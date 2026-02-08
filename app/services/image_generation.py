@@ -54,5 +54,30 @@ class ImageGenerationService:
         self.jobs.set_status(job_id, "completed")
         return job_id
 
+    async def refine(self, payload: ImageGenerationRequest, feedback: str) -> str:
+        job_id = str(uuid.uuid4())
+        self.jobs.create(job_id, status="queued")
+
+        keywords = await crawl_keywords(payload.product)
+
+        images: List[GeneratedImage] = []
+        for brief in payload.image_briefs:
+            prompt = build_prompt(payload.project, payload.brand, payload.product, brief, keywords, feedback=feedback)
+            image_url = await self.ai_client.generate_image(prompt, size=self.settings.image_size)
+            file_path = await save_image(image_url, self.settings.output_dir, f"{job_id}_{brief.slot_name}.png")
+            images.append(
+                GeneratedImage(
+                    slot_name=brief.slot_name,
+                    prompt=prompt,
+                    image_url=image_url,
+                    file_path=file_path,
+                    background_removed=False,
+                )
+            )
+
+        self.jobs.set_images(job_id, images)
+        self.jobs.set_status(job_id, "completed")
+        return job_id
+
     def get_status(self, job_id: str):
         return self.jobs.get(job_id)

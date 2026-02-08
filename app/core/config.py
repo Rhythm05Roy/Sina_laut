@@ -9,8 +9,8 @@ class Settings(BaseSettings):
 
     # AI provider: Nano Banana (Gemini image)
     nano_banana_api_key: str | None = None
-    # default to Imagen fast model; adjust if you have access to pro
-    nano_banana_model: str = "imagen-3.0-fast"
+    # default to Gemini image-generation capable model
+    nano_banana_model: str = "gemini-2.0-flash-exp-image-generation"
     nano_banana_base_url: HttpUrl = "https://generativelanguage.googleapis.com/v1beta"
 
     image_size: str = "1024x1024"

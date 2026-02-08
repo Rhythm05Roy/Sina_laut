@@ -22,17 +22,10 @@ class AIClient:
         if not self.api_key:
             return self._placeholder(prompt, size)
 
-        width, height = self._parse_size(size or self.settings.image_size)
         payload = {
-            "prompt": {"text": prompt},
-            "imageGenerationConfig": {
-                "numberOfImages": 1,
-                "widthPixels": width,
-                "heightPixels": height,
-                "mimeType": "image/png",
-            },
+            "contents": [{"parts": [{"text": prompt}]}],
         }
-        url = f"{self.base_url}/models/{model or self.model}:generateImage"
+        url = f"{self.base_url}/models/{model or self.model}:generateContent"
         headers = {"Content-Type": "application/json"}
         params = {"key": self.api_key}
 
@@ -46,12 +39,12 @@ class AIClient:
                     resp.raise_for_status()
 
                 data = resp.json()
-                images = data.get("images") or data.get("generatedImages") or []
-                if not images:
-                    raise RuntimeError("No image returned from provider")
-                img = images[0]
-                b64 = img.get("base64Data") or img.get("imageData") or img.get("data")
-                mime = img.get("mimeType", "image/png")
+                parts = data["candidates"][0]["content"]["parts"]
+                inline = next((p["inlineData"] for p in parts if "inlineData" in p), None)
+                if not inline:
+                    raise RuntimeError("No inlineData image returned from provider")
+                b64 = inline.get("data")
+                mime = inline.get("mimeType", "image/png")
                 if not b64:
                     raise RuntimeError("Image payload missing base64 data")
                 return f"data:{mime};base64,{b64}"
@@ -61,8 +54,9 @@ class AIClient:
 
     def _placeholder(self, prompt: str, size: str | None) -> str:
         safe_prompt = quote(prompt)[:80]
-        dims = (size or self.settings.image_size).replace("x", "/")
-        return f"https://placehold.co/{dims}/png?text={safe_prompt}"
+        dims = (size or self.settings.image_size)
+        # Force PNG output to avoid SVG placeholders
+        return f"https://placehold.co/{dims}.png?text={safe_prompt}"
 
     @staticmethod
     def _parse_size(size: str) -> tuple[int, int]:

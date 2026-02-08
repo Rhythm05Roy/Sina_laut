@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field
 from typing import List
 from app.schemas.project import ProjectSetup
 from app.schemas.brand import BrandCI
@@ -7,7 +7,7 @@ from app.schemas.image import ImageBrief
 
 class Asset(BaseModel):
     type: str = Field(..., example="product_photo")
-    url: HttpUrl
+    url: str = Field(..., description="Image URL or data URL", min_length=1)
 
 class ImageGenerationRequest(BaseModel):
     project: ProjectSetup

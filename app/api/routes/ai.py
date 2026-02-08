@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_image_generation_service, get_job_store
 from app.schemas.generation import ImageGenerationRequest, GenerationResponse
+from app.schemas.feedback import FeedbackRequest, FeedbackResponse
 from app.schemas.image import GenerationStatus
 from app.services.image_generation import ImageGenerationService
 from app.services.job_store import InMemoryJobStore
@@ -27,3 +28,12 @@ async def get_job_status(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return GenerationStatus(job_id=job_id, status=job.status, images=job.images)
+
+
+@router.post("/refine", response_model=FeedbackResponse, status_code=202)
+async def refine_images(
+    payload: FeedbackRequest,
+    generator: ImageGenerationService = Depends(get_image_generation_service),
+) -> FeedbackResponse:
+    job_id = await generator.refine(payload.request, payload.feedback)
+    return FeedbackResponse(job_id=job_id, status="queued")
