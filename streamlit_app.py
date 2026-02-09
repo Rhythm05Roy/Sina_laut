@@ -19,6 +19,13 @@ SLOTS = [
     ("comparison", "Comparison"),
 ]
 
+# Style template options
+STYLE_TEMPLATES = [
+    ("playful", "Playful (Playmobil style) - Vibrant, circular badges, fun"),
+    ("modern", "Modern / Clean - Professional, rectangular, muted"),
+    ("minimal", "Minimal - Text-focused, subtle branding"),
+]
+
 # ---------- Helpers ----------
 def call_api(method: str, url: str, **kwargs) -> requests.Response:
     func = getattr(requests, method.lower())
@@ -26,7 +33,7 @@ def call_api(method: str, url: str, **kwargs) -> requests.Response:
     return resp
 
 
-def build_payload(project: Dict[str, Any], brand: Dict[str, Any], product: Dict[str, Any], assets: List[Dict[str, str]], briefs: List[Dict[str, Any]], remove_bg: bool) -> Dict[str, Any]:
+def build_payload(project: Dict[str, Any], brand: Dict[str, Any], product: Dict[str, Any], assets: List[Dict[str, str]], briefs: List[Dict[str, Any]], remove_bg: bool, style_template: str) -> Dict[str, Any]:
     return {
         "project": project,
         "brand": brand,
@@ -34,6 +41,7 @@ def build_payload(project: Dict[str, Any], brand: Dict[str, Any], product: Dict[
         "assets": assets,
         "image_briefs": briefs,
         "remove_background": remove_bg,
+        "style_template": style_template,
     }
 
 
@@ -48,7 +56,7 @@ def render_images(images: List[Dict[str, Any]]):
                 st.image(path, caption=path)
             elif url:
                 st.image(url, caption=url)
-            st.caption(img.get("prompt", ""))
+            st.caption(img.get("prompt", "")[:200] + "...")
 
 
 def text_to_list(val: str) -> List[str]:
@@ -79,13 +87,27 @@ tabs = st.tabs(["Generate", "Refine", "Jobs"])
 with tabs[0]:
     st.subheader("Generate images")
     with st.form("gen_form"):
+        # Style Template Selection - Prominent at top
+        st.markdown("### 🎨 Style Template")
+        style_template = st.selectbox(
+            "Choose visual style",
+            options=[s[0] for s in STYLE_TEMPLATES],
+            format_func=lambda x: next((s[1] for s in STYLE_TEMPLATES if s[0] == x), x),
+            index=0,
+            help="Select the visual layout style for generated images"
+        )
+        
+        st.markdown("---")
+        
         col1, col2 = st.columns(2)
         with col1:
+            st.markdown("**Project Settings**")
             project_name = st.text_input("Project name", "Playmobil Launch")
             brand_name = st.text_input("Brand name", "Playmobil")
             category = st.text_input("Product category", "Toys")
             marketplaces = st.multiselect("Target marketplaces", ["amazon", "google"], default=["amazon"])
         with col2:
+            st.markdown("**Brand Assets**")
             logo_file = st.file_uploader("Brand logo (PNG/JPG/SVG)", type=["png", "jpg", "jpeg", "svg"])
             primary_color = st.text_input("Primary color", "#6366f1")
             secondary_color = st.text_input("Secondary color", "#8b5cf6")
@@ -116,7 +138,7 @@ with tabs[0]:
                 style = st.text_input(f"Style ({slot})", "Playful", key=f"style_{slot}")
             briefs.append({"slot_name": slot, "instructions": inst, "emphasis": emphasis, "style": style})
 
-        submitted = st.form_submit_button("Send /api/ai/generate")
+        submitted = st.form_submit_button("🚀 Generate Images", type="primary")
         if submitted:
             project = {
                 "project_name": project_name,
@@ -141,7 +163,7 @@ with tabs[0]:
             }
             asset_url = to_data_url(asset_file)
             assets = [{"type": "product_photo", "url": asset_url}] if asset_url else []
-            payload = build_payload(project, brand, product, assets, briefs, remove_bg)
+            payload = build_payload(project, brand, product, assets, briefs, remove_bg, style_template)
             resp = call_api("post", f"{base_url}/ai/generate", json=payload)
             if resp.status_code >= 400:
                 st.error(f"Error {resp.status_code}: {resp.text}")
@@ -157,6 +179,19 @@ with tabs[1]:
     st.subheader("Refine with feedback")
     with st.form("refine_form"):
         feedback = st.text_input("Feedback (e.g., 'more premium look, focus on outdoor usage')", "more premium look")
+        
+        # Style Template Selection
+        st.markdown("### 🎨 Style Template")
+        style_template_refine = st.selectbox(
+            "Choose visual style ",
+            options=[s[0] for s in STYLE_TEMPLATES],
+            format_func=lambda x: next((s[1] for s in STYLE_TEMPLATES if s[0] == x), x),
+            index=0,
+            key="refine_style"
+        )
+        
+        st.markdown("---")
+        
         col1, col2 = st.columns(2)
         with col1:
             project_name = st.text_input("Project name ", "Playmobil Launch", key="ref_proj")
@@ -191,7 +226,7 @@ with tabs[1]:
                 style = st.text_input(f"Style ({slot}) ", "Playful", key=f"ref_style_{slot}")
             briefs.append({"slot_name": slot, "instructions": inst, "emphasis": emphasis, "style": style})
 
-        submitted = st.form_submit_button("Send /api/ai/refine")
+        submitted = st.form_submit_button("🔄 Refine Images", type="primary")
         if submitted:
             project = {
                 "project_name": project_name,
@@ -216,7 +251,7 @@ with tabs[1]:
             }
             asset_url = to_data_url(asset_file)
             assets = [{"type": "product_photo", "url": asset_url}] if asset_url else []
-            payload = build_payload(project, brand, product, assets, briefs, remove_bg)
+            payload = build_payload(project, brand, product, assets, briefs, remove_bg, style_template_refine)
             body = {"feedback": feedback, "request": payload}
             resp = call_api("post", f"{base_url}/ai/refine", json=body)
             if resp.status_code >= 400:
@@ -247,3 +282,8 @@ with tabs[2]:
 
 st.sidebar.markdown("---")
 st.sidebar.write("1) Run FastAPI: `uvicorn app.main:app --reload`\n2) Run Streamlit: `streamlit run streamlit_app.py`")
+st.sidebar.markdown("---")
+st.sidebar.markdown("### Style Templates")
+st.sidebar.markdown("- **Playful**: Vibrant, 4 circular badges, centered logo")
+st.sidebar.markdown("- **Modern**: Clean, rectangular badges, corner logo")
+st.sidebar.markdown("- **Minimal**: Text-only, subtle watermark logo")
