@@ -1,106 +1,196 @@
-from typing import Dict, List
+"""
+Production-grade slot templates for marketplace image generation.
+
+Each slot has a carefully crafted prompt that:
+- Prevents text hallucination (uses EXACT user-provided text only)
+- Specifies precise layout composition
+- Includes anti-hallucination guardrails
+"""
+
+from typing import Dict, List, Optional
+
 
 SLOT_TEMPLATES: Dict[str, Dict[str, str]] = {
     "main_product": {
         "title": "Main Image",
         "instructions": (
-            "Create a professional e-commerce product listing image. "
-            "LAYOUT REQUIREMENTS: "
-            "1. Place the PROVIDED product image CENTERED on a clean white/neutral background. "
-            "2. At the TOP: Display the brand logo (if provided) centered. "
-            "3. At the BOTTOM: Show 4 circular badges in a horizontal row containing key product facts "
-            "(e.g., age rating like '4+', piece count like '72 pieces', feature icons with brief labels). "
-            "4. Use the brand's primary and secondary colors for the circular badges and accent elements. "
-            "5. Include a prominent product tagline or title below the product. "
-            "STYLE: Professional product photography, Amazon/Google listing compliant, clean and premium look. "
-            "CRITICAL: Use the actual product image provided - do NOT generate a different product."
-        )
+            "TASK: Clean up the provided product image for marketplace listing. "
+            "DO ONLY THE FOLLOWING: "
+            "1. Remove the existing background and replace with PURE WHITE (#FFFFFF). "
+            "2. Center the product so it fills approximately 85% of the frame. "
+            "3. Ensure the product edges are clean and sharp. "
+            "4. Maintain the original product appearance exactly as-is. "
+            "\n"
+            "DO NOT DO ANY OF THE FOLLOWING: "
+            "- Do NOT add any text, titles, labels, or watermarks. "
+            "- Do NOT add any logos or brand elements. "
+            "- Do NOT add badges, icons, or decorative graphics. "
+            "- Do NOT add borders, frames, or shadows. "
+            "- Do NOT modify the product itself in any way. "
+            "- Do NOT generate a different product — use ONLY the provided image. "
+            "\n"
+            "OUTPUT: A clean product photo on pure white background, nothing else."
+        ),
     },
+
     "key_facts": {
         "title": "Key Facts",
         "instructions": (
-            "Create an informational product image with key facts layout. "
+            "TASK: Create a professional product infographic with EXACTLY 4 key fact callouts. "
+            "\n"
             "LAYOUT REQUIREMENTS: "
-            "1. Place the PROVIDED product image on the LEFT side (about 60% of image). "
-            "2. At the TOP: Display brand logo and sub-brand logo (if applicable). "
-            "3. On the RIGHT side: Display 4 circular info badges stacked vertically with icons and text "
-            "showing key product facts (features, specifications, benefits). "
-            "4. Use brand colors for the info badges - primary color for background, text in white or secondary color. "
-            "5. Include small descriptive icons inside or next to each badge. "
-            "STYLE: Professional infographic style, clean typography, visually balanced. "
-            "CRITICAL: Incorporate the provided product image - do NOT create a new product."
-        )
+            "1. BACKGROUND: Clean, professional background using the specified style. "
+            "2. PRODUCT: Place the product image prominently on the LEFT side (50-60% width). "
+            "3. KEY FACTS: Place EXACTLY 4 rectangular info cards on the RIGHT side, stacked vertically. "
+            "   - Each card has a small icon and the EXACT text provided by the user. "
+            "   - Cards should have rounded corners, subtle shadow, and use brand colors. "
+            "4. BRAND LOGO: Place at the specified position (top, bottom, etc.). "
+            "\n"
+            "CRITICAL TEXT RULES: "
+            "- Render ONLY the exact key fact text strings provided below. "
+            "- DO NOT invent, paraphrase, or hallucinate any text. "
+            "- If a key fact is empty, skip it — do not make up content. "
+            "- Text must be LEGIBLE: use clean sans-serif font, minimum 18pt equivalent. "
+            "\n"
+            "QUALITY: Professional infographic quality suitable for Amazon/Google marketplace listing."
+        ),
     },
+
     "lifestyle": {
         "title": "Lifestyle",
         "instructions": (
-            "Create a lifestyle scene showing the product in use. "
-            "LAYOUT REQUIREMENTS: "
-            "1. Show a realistic scene of a child/person happily using/playing with the product. "
-            "2. The PROVIDED product should be clearly visible and recognizable in the scene. "
-            "3. Add 2-3 floating info callout boxes or labels highlighting key features. "
-            "4. Include product dimensions or size reference if applicable. "
-            "5. Use warm, inviting lighting - natural home environment or appropriate setting. "
-            "STYLE: Lifestyle photography, warm and engaging, relatable family/play moments. "
-            "CRITICAL: The product in the scene should match the provided product image."
-        )
+            "TASK: Create a premium lifestyle photograph showing the product in real-world use. "
+            "\n"
+            "COMPOSITION REQUIREMENTS: "
+            "1. SCENE: A realistic, aspirational setting matching the scenario description. "
+            "2. PRODUCT VISIBILITY: The product must be clearly visible and recognizable — "
+            "   it should be the hero of the scene, not a background element. "
+            "3. LIGHTING: Professional studio-quality lighting — warm, natural, inviting. "
+            "   Use golden-hour style warmth for indoor scenes, bright natural light for outdoors. "
+            "4. DEPTH OF FIELD: Shallow depth of field with product in sharp focus. "
+            "5. COLOR GRADING: Professional color grading — warm tones, high dynamic range. "
+            "\n"
+            "DO NOT: "
+            "- Do NOT add any text overlays, labels, or captions to the image. "
+            "- Do NOT add logos or brand elements. "
+            "- Do NOT make the scene look artificial or stock-photo generic. "
+            "\n"
+            "QUALITY: Professional advertising photography quality — this should look like a "
+            "high-budget brand campaign shot, not a basic product photo."
+        ),
     },
+
     "usps": {
-        "title": "USPs",
+        "title": "USP Highlight",
         "instructions": (
-            "Create an image highlighting Unique Selling Points (USPs). "
+            "TASK: Create a professional USP (Unique Selling Points) highlight image. "
+            "\n"
             "LAYOUT REQUIREMENTS: "
-            "1. Product image featured prominently (center or left side). "
-            "2. Display 3-5 USP cards/badges with icons and brief text descriptions. "
-            "3. Use visual connectors (lines, arrows) pointing from USP badges to relevant product areas. "
-            "4. Brand logo at top corner. "
-            "5. Use brand colors for USP badges and visual elements. "
-            "STYLE: Clean marketing infographic, easy to scan, professional. "
-            "CRITICAL: Use the provided product image."
-        )
+            "1. PRODUCT: Place the product image CENTERED in the composition. "
+            "2. USP CALLOUTS: Arrange 3-4 USP callout boxes AROUND the product: "
+            "   - Each callout is a rounded rectangle with: "
+            "     • A small relevant ICON (e.g., shield for quality, clock for speed) "
+            "     • The EXACT USP text provided by the user (one line, bold) "
+            "   - Connect each callout to the product with a thin line or arrow. "
+            "   - Use brand primary color for callout backgrounds, white text. "
+            "3. BRAND LOGO: Small, in the top-left or top-right corner. "
+            "4. BACKGROUND: Clean gradient or solid using brand secondary color (light). "
+            "\n"
+            "CRITICAL TEXT RULES: "
+            "- Render ONLY the exact USP text strings provided below. "
+            "- DO NOT invent, paraphrase, or hallucinate any text. "
+            "- Each USP text must be rendered in a CLEAR, READABLE font. "
+            "- Minimum font size equivalent to 20pt for USP labels. "
+            "\n"
+            "QUALITY: Premium marketing infographic — clean, scannable, professional."
+        ),
     },
-    "cross_selling": {
-        "title": "Cross-Selling",
-        "instructions": (
-            "Create a cross-selling collage image. "
-            "LAYOUT REQUIREMENTS: "
-            "1. Main product featured larger in center or primary position. "
-            "2. Display 4-6 related/complementary products in a grid or collage around the main product. "
-            "3. Include 'Discover more' or similar CTA text. "
-            "4. Add brand logo and product line name. "
-            "5. Optional: Include article numbers or product names below each item. "
-            "STYLE: Clean product collage, consistent lighting and styling across all items. "
-            "CRITICAL: Main product should match the provided product image."
-        )
-    },
-    "closing": {
-        "title": "Closing",
-        "instructions": (
-            "Create a closing/summary image. "
-            "LAYOUT REQUIREMENTS: "
-            "1. Product featured in an aspirational world-building scene. "
-            "2. Include a compelling CTA question or statement (e.g., 'Ready to start the adventure?'). "
-            "3. Summarize key value proposition in 1-2 short lines. "
-            "4. Brand logo prominently displayed. "
-            "5. Use brand colors for text overlays and accents. "
-            "STYLE: Inspirational, premium feel, drives purchase intent."
-        )
-    },
+
     "comparison": {
         "title": "Comparison",
         "instructions": (
-            "Create a comparison image showing product advantages. "
+            "TASK: Create a professional product comparison image (Us vs Others). "
+            "\n"
             "LAYOUT REQUIREMENTS: "
-            "1. Side-by-side or checklist comparison format. "
-            "2. Show what this product does better than alternatives. "
-            "3. Use checkmarks, X marks, or rating scales for clear visual comparison. "
-            "4. Product image on one side, comparison elements on the other. "
-            "5. Brand colors for positive highlights. "
-            "STYLE: Clear comparison chart/infographic, easy to understand at a glance."
-        )
+            "1. SPLIT LAYOUT: Divide the image into TWO vertical halves: "
+            "   - LEFT HALF (Our Product — Advantages): "
+            "     • Header: '✓ Our Product' in green/brand color "
+            "     • List 3 advantage items with GREEN checkmarks "
+            "     • Clean, professional card-style rows "
+            "   - RIGHT HALF (Other Products — Limitations): "
+            "     • Header: '✗ Others' in red/gray "
+            "     • List 3 limitation items with RED X marks "
+            "     • Same card-style rows for visual consistency "
+            "2. PRODUCT: Small product image at the top center or left-center. "
+            "3. BRAND LOGO: Top corner, small. "
+            "4. BACKGROUND: Clean white or very light gray. "
+            "\n"
+            "CRITICAL TEXT RULES: "
+            "- Render ONLY the exact advantage and limitation texts provided below. "
+            "- DO NOT invent, paraphrase, or hallucinate any text. "
+            "- Use clear, sans-serif font. Green for advantages, red for limitations. "
+            "\n"
+            "QUALITY: Clean comparison infographic — easy to read at a glance."
+        ),
+    },
+
+    "cross_selling": {
+        "title": "Cross-Selling",
+        "instructions": (
+            "TASK: Create a cross-selling product showcase image. "
+            "\n"
+            "LAYOUT REQUIREMENTS: "
+            "1. HERO PRODUCT: Place the main product LARGER at the top-center (30-40% of height). "
+            "2. RELATED PRODUCTS GRID: Below the hero, create a 3×2 grid of 6 product slots: "
+            "   - Each slot is a card with rounded corners and subtle border. "
+            "   - Each card shows: a product placeholder image area + product label below. "
+            "   - Use the EXACT product names provided by the user as labels. "
+            "3. CALL TO ACTION: Include text 'Discover More' or 'Complete Your Collection' "
+            "   in brand primary color at the bottom. "
+            "4. BRAND LOGO: Top-left, small. "
+            "5. BACKGROUND: Clean white with subtle grid lines or soft gradient. "
+            "\n"
+            "CRITICAL TEXT RULES: "
+            "- Use ONLY the exact product names provided below for the grid labels. "
+            "- DO NOT invent product names or descriptions. "
+            "- Text must be legible and professionally typeset. "
+            "\n"
+            "QUALITY: Professional e-commerce cross-sell layout — clean, organized, inviting."
+        ),
+    },
+
+    "closing": {
+        "title": "Closing",
+        "instructions": (
+            "TASK: Create a powerful closing / emotional image for the product listing. "
+            "\n"
+            "LAYOUT REQUIREMENTS: "
+            "1. PRODUCT: Product displayed beautifully — hero shot, slightly angled or in context. "
+            "2. EMOTIONAL DIRECTION: Follow the specified direction: "
+            "   - 'Emotional': Warm colors, soft focus background, evoke feeling of joy/satisfaction. "
+            "   - 'Inspirational': Bold composition, dramatic lighting, aspirational mood. "
+            "   - 'Brand Storytelling': Logo prominent, brand colors dominant, 'about us' feel. "
+            "3. HEADLINE: Render the custom closing headline text (if provided) in large, "
+            "   elegant typography — centered or bottom-third. "
+            "4. BRAND LOGO: Prominently displayed. "
+            "5. BACKGROUND: Rich, atmospheric — gradient, bokeh, or lifestyle scene. "
+            "\n"
+            "CRITICAL TEXT RULES: "
+            "- If a custom headline is provided, render it EXACTLY as given. "
+            "- DO NOT invent slogans, taglines, or any text not provided. "
+            "- If no headline provided, do NOT add any text — just the visual composition. "
+            "\n"
+            "QUALITY: Premium brand campaign quality — this is the final impression."
+        ),
     },
 }
 
 
 def slot_default(slot_name: str) -> str:
+    """Get default instructions for a slot."""
     return SLOT_TEMPLATES.get(slot_name, {}).get("instructions", "Marketplace-ready marketing image.")
+
+
+def get_slot_title(slot_name: str) -> str:
+    """Get display title for a slot."""
+    return SLOT_TEMPLATES.get(slot_name, {}).get("title", slot_name)

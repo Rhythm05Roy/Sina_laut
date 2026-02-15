@@ -24,9 +24,9 @@ class AIClient:
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.api_key = settings.nano_banana_api_key
-        self.model = settings.nano_banana_model
-        self.base_url = str(settings.nano_banana_base_url).rstrip("/")
+        self.api_key = settings.active_api_key
+        self.model = settings.active_model
+        self.base_url = settings.active_base_url.rstrip("/")
 
     async def generate_image(
         self,

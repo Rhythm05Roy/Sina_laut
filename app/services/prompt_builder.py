@@ -1,5 +1,14 @@
+"""
+Prompt builder for production-grade marketplace image generation.
+
+Key principles:
+- Anti-hallucination: model must ONLY render user-provided text
+- Slot-specific context chaining (Image 2+ can reference Image 1)
+- Explicit layout instructions per style template
+"""
+
 from __future__ import annotations
-from typing import List, Dict
+from typing import List, Dict, Optional
 from app.schemas.project import ProjectSetup
 from app.schemas.brand import BrandCI
 from app.schemas.product import ProductInfo
@@ -7,6 +16,18 @@ from app.schemas.image import ImageBrief
 from app.schemas.style_template import StyleTemplate
 from app.services.slots import slot_default
 from app.services.style_instructions import get_style_instructions
+
+
+# Global anti-hallucination prefix injected into every prompt
+ANTI_HALLUCINATION = """
+=== CRITICAL: TEXT RENDERING RULES ===
+You are generating a product image for an e-commerce marketplace.
+- DO NOT generate random, garbled, or hallucinated text.
+- ONLY render the EXACT text strings provided in this prompt.
+- If no text is specified for an element, leave that element WITHOUT text.
+- Every word in the output image must come directly from this prompt.
+- Misspelled or gibberish text is UNACCEPTABLE — double-check every character.
+""".strip()
 
 
 def build_prompt(
@@ -19,68 +40,106 @@ def build_prompt(
     style_template: StyleTemplate = StyleTemplate.PLAYFUL,
 ) -> str:
     """
-    Compose a comprehensive prompt for the image generator with multi-modal context
-    and style-specific layout instructions.
+    Compose a comprehensive prompt for the image generator.
+
+    The prompt includes:
+    - Anti-hallucination guardrails
+    - Slot-specific instructions (from slots.py)
+    - Style-specific layout (from style_instructions.py)
+    - Product info and brand guidelines
+    - User-provided emphasis text (rendered verbatim)
     """
-    key_terms = keywords.get("primary", [])[:5] + keywords.get("secondary", [])[:3]
-    usp_text = "; ".join(product.usps) if product.usps else "Highlight core benefits"
-    style_hint = f"Style: {brief.style}." if brief.style else ""
+    usp_text = "; ".join(product.usps) if product.usps else ""
+    style_hint = f"Visual style: {brief.style}." if brief.style else ""
     slot_inst = brief.instructions or slot_default(brief.slot_name)
-    feedback_hint = f"\nADDITIONAL FEEDBACK TO INCORPORATE: {feedback}" if feedback else ""
-    
-    # Build emphasis list
-    emphasis_text = ", ".join(brief.emphasis) if brief.emphasis else "product quality and benefits"
-    
+    feedback_hint = f"\nADDITIONAL REFINEMENT FEEDBACK: {feedback}" if feedback else ""
+
+    # Build emphasis / user-provided text list
+    emphasis_items = brief.emphasis if brief.emphasis else []
+    emphasis_block = ""
+    if emphasis_items:
+        lines = [f'  {i+1}. "{item}"' for i, item in enumerate(emphasis_items) if item.strip()]
+        if lines:
+            emphasis_block = "USER-PROVIDED TEXT TO RENDER VERBATIM:\n" + "\n".join(lines)
+
     # Get style-specific layout instructions
     style_layout = get_style_instructions(style_template, brief.slot_name)
-    
-    # Construct comprehensive prompt
-    prompt = f"""CONTEXT: You are an expert e-commerce product image designer. You are given a product image and brand logo as input.
-Your task is to create a marketplace-ready product listing image for {project.brand_name} in the {project.product_category} category.
 
-=== CRITICAL REQUIREMENTS ===
-1. You MUST incorporate the PROVIDED product image into your design - do NOT generate a different product.
-2. Use the EXACT product shown in the input image.
-3. If a brand logo is provided, include it as specified in the style instructions.
-4. Follow the layout requirements PRECISELY - this is essential for consistency.
+    # Determine slot-specific sections
+    slot_specific = ""
+    if brief.slot_name == "main_product":
+        slot_specific = (
+            "THIS IS A BACKGROUND-REMOVAL-ONLY TASK.\n"
+            "Do NOT add ANY elements. Just clean the background to white and center the product."
+        )
+    elif brief.slot_name == "key_facts":
+        slot_specific = (
+            "RENDER THESE EXACT KEY FACTS ON THE INFO CARDS:\n"
+            + "\n".join(f'  Card {i+1}: "{e}"' for i, e in enumerate(emphasis_items) if e.strip())
+            if emphasis_items else "No key facts provided."
+        )
+    elif brief.slot_name == "usps":
+        usp_lines = [f'  USP {i+1}: "{u}"' for i, u in enumerate(product.usps) if u] if product.usps else []
+        if emphasis_items:
+            usp_lines = [f'  USP {i+1}: "{e}"' for i, e in enumerate(emphasis_items) if e.strip()]
+        slot_specific = (
+            "RENDER THESE EXACT USP TEXTS ON THE CALLOUT BOXES:\n"
+            + "\n".join(usp_lines)
+            if usp_lines else "Use the product USPs."
+        )
+    elif brief.slot_name == "comparison":
+        slot_specific = (
+            "USE THESE EXACT TEXTS FOR THE COMPARISON:\n"
+            + "\n".join(f'  • "{e}"' for e in emphasis_items if e.strip())
+            if emphasis_items else "Use generic comparison."
+        )
+    elif brief.slot_name == "cross_selling":
+        slot_specific = (
+            "USE THESE EXACT PRODUCT NAMES FOR THE GRID:\n"
+            + "\n".join(f'  Slot {i+1}: "{e}"' for i, e in enumerate(emphasis_items) if e.strip())
+            if emphasis_items else "Use generic product placeholders."
+        )
+    elif brief.slot_name == "closing":
+        headline = emphasis_items[0] if emphasis_items and emphasis_items[0].strip() else ""
+        direction = brief.style or "Emotional"
+        slot_specific = (
+            f"DIRECTION: {direction}\n"
+            f'HEADLINE TO RENDER: "{headline}"' if headline else
+            f"DIRECTION: {direction}\nNo headline — create a purely visual composition."
+        )
 
-=== STYLE TEMPLATE LAYOUT ===
-{style_layout}
+    prompt = f"""{ANTI_HALLUCINATION}
 
-=== SLOT-SPECIFIC INSTRUCTIONS ===
-SLOT TYPE: {brief.slot_name}
-ADDITIONAL SLOT INSTRUCTIONS: {slot_inst}
+=== TASK ===
+{slot_inst}
+
+=== SLOT TYPE ===
+{brief.slot_name}
 {style_hint}
+
+{slot_specific}
 
 === PRODUCT INFORMATION ===
 - Brand: {project.brand_name}
-- Product Title: {product.title}
+- Product: {product.title}
 - Description: {product.short_description}
-- USPs to highlight: {usp_text}
-- Key attributes to emphasize: {emphasis_text}
-
-=== CONTENT FOR INFO BADGES ===
-Use these for the circular/rectangular info badges:
-- Age rating or target audience
-- Piece count or quantity (if applicable)
-- Key feature 1: {product.usps[0] if product.usps else 'Premium Quality'}
-- Key feature 2: {product.usps[1] if len(product.usps) > 1 else 'Great Value'}
+{f'- USPs: {usp_text}' if usp_text else ''}
 
 === BRAND GUIDELINES ===
-- Primary color: {brand.primary_color} (use for main elements)
-- Secondary color: {brand.secondary_color} (use for accents)
+- Primary color: {brand.primary_color}
+- Secondary color: {brand.secondary_color}
 - Heading font: {brand.font_heading}
 - Body font: {brand.font_body}
 
-=== KEYWORDS TO INCORPORATE ===
-Subtly incorporate these keywords: {', '.join(key_terms) if key_terms else 'product quality, premium'}
-{feedback_hint}
+{emphasis_block}
+
+=== STYLE LAYOUT ===
+{style_layout}
 
 === OUTPUT REQUIREMENTS ===
-- High resolution (1024x1024 or higher)
-- Professional quality suitable for Amazon/Google listings
-- Clean, polished final image ready for marketplace use
-- Follow the style template layout EXACTLY as specified above
+- Resolution: 1024×1024 or higher
+- Professional quality suitable for Amazon / Google marketplace
+- Clean, polished, production-ready
+{feedback_hint}
 """
-    
     return prompt.strip()
