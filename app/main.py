@@ -10,25 +10,20 @@ settings = get_settings()
 app = FastAPI(
     title=settings.app_name,
     description=(
-        "## AI-Powered Marketplace Image Generation\n\n"
-        "Generate production-grade product listing images for **Amazon**, **Google Shopping**, and more.\n\n"
-        "### Wizard Flow\n"
-        "The API follows the same 4-step wizard as the Streamlit UI:\n\n"
-        "| Step | Endpoint Group | Description |\n"
-        "|------|---------------|-------------|\n"
-        "| **1** | `/api/project` | Create project (name, brand, category, marketplace) |\n"
-        "| **2** | `/api/brand` | Configure brand CI (logo, colors, fonts) |\n"
-        "| **3** | `/api/product` | Set product info (SKU, title, USPs, keywords) |\n"
-        "| **4** | `/api/ai` | Generate & refine images per slot |\n\n"
-        "### Image Slots\n"
-        "Each project generates up to 7 images:\n"
-        "1. **Main Product** — background removal only\n"
-        "2. **Key Facts** — infographic with key product facts\n"
-        "3. **Lifestyle** — product in real-world setting\n"
-        "4. **USP Highlight** — unique selling points with callout boxes\n"
-        "5. **Comparison** — us vs others (advantages / limitations)\n"
-        "6. **Cross-Selling** — related products grid\n"
-        "7. **Closing** — emotional / inspirational final image\n"
+        "## AI-Powered Marketplace Image Generation API\n\n"
+        "Generate production-grade product listing images following a stateful, step-by-step wizard flow.\n\n"
+        "### Step-by-Step API Flow\n\n"
+        "The API mirrors the 4-step wizard UI:\n\n"
+        "| Step | Route Prefix | Action | Output |\n"
+        "|------|--------------|--------|--------|\n"
+        "| **1** | `/api/step1/project` | Create Project | `project_id` |\n"
+        "| **2** | `/api/step2/brand` | Save Brand CI | linked to `project_id` |\n"
+        "| **3** | `/api/step3/product` | Save Product Info | linked to `project_id` |\n"
+        "| **4** | `/api/step4/generate` | Generate Images | `job_id` |\n\n"
+        "### Usage\n"
+        "1. Start by creating a project in **Step 1** to get a `id`.\n"
+        "2. Use that `id` to configure Brand (Step 2) and Product (Step 3).\n"
+        "3. Finally, call Step 4 generation endpoints using the same `id` to produce images based on the saved context.\n"
     ),
     version=settings.version,
     openapi_url=f"{settings.api_prefix}/openapi.json",
@@ -37,26 +32,23 @@ app = FastAPI(
     openapi_tags=[
         {
             "name": "Step 1 — Project Setup",
-            "description": "Create and manage image generation projects.",
+            "description": "Create a new image generation project.",
         },
         {
             "name": "Step 2 — Brand CI",
-            "description": "Configure brand identity: logo, colors, fonts.",
+            "description": "Configure brand identity (logo, colors, fonts).",
         },
         {
             "name": "Step 3 — Product Info",
-            "description": "Set product details: SKU, title, description, USPs, keywords, languages.",
+            "description": "Set product details (SKU, title, USPs).",
         },
         {
             "name": "Step 4 — Image Generation",
-            "description": (
-                "Generate, refine, and poll marketplace-ready product images. "
-                "Supports 7 slot types with anti-hallucination prompts."
-            ),
+            "description": "Generate images statefully using project context.",
         },
         {
             "name": "system",
-            "description": "Health checks and system status.",
+            "description": "Health checks.",
         },
     ],
 )
@@ -70,6 +62,7 @@ app.add_middleware(
 )
 
 # ── Register all route modules ──
+# Note: Prefixes inside routers handle the /stepX part. api_prefix handles /api.
 app.include_router(health.router, prefix=settings.api_prefix)
 app.include_router(project.router, prefix=settings.api_prefix)
 app.include_router(brand.router, prefix=settings.api_prefix)
@@ -83,4 +76,10 @@ async def root() -> dict[str, str]:
         "message": f"{settings.app_name} v{settings.version} running",
         "docs": "/docs",
         "redoc": "/redoc",
+        "steps": [
+            "/api/step1/project",
+            "/api/step2/brand",
+            "/api/step3/product",
+            "/api/step4/generate",
+        ]
     }

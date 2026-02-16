@@ -1,37 +1,25 @@
 """
 Step 3 — Product Information API routes.
-Manages product details: SKU, title, description, USPs, keywords, languages.
 """
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from typing import Dict, List, Optional
+from typing import Dict, List
 from uuid import uuid4
 
 from app.schemas.product import ProductInfo
+from app.core.store import products, projects, get_product_by_project_id
 
-router = APIRouter(prefix="/product", tags=["Step 3 — Product Info"])
-
-# In-memory store
-_products: Dict[str, dict] = {}
-
+router = APIRouter(prefix="/step3/product", tags=["Step 3 — Product Info"])
 
 class ProductCreateRequest(BaseModel):
     project_id: str = Field(..., description="ID of the project this product belongs to")
     product: ProductInfo
 
-
-class ProductResponse(BaseModel):
+class ProductResponse(ProductInfo):
     id: str
     project_id: str
-    sku: str
-    title: str
-    short_description: str
-    usps: List[str] = []
-    keywords: Dict[str, List[str]] = {}
-    languages: List[str] = ["en"]
-    message: str = "Product info saved successfully"
-
+    message: str = "Product info saved successfully. Proceed to Step 4."
 
 @router.post(
     "/save",
@@ -45,28 +33,17 @@ class ProductResponse(BaseModel):
     ),
 )
 async def save_product(payload: ProductCreateRequest) -> ProductResponse:
+    if payload.project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project ID not found")
+        
     product_id = str(uuid4())
     data = {
         "id": product_id,
         "project_id": payload.project_id,
         **payload.product.model_dump(),
     }
-    _products[product_id] = data
+    products[product_id] = data
     return ProductResponse(**data)
-
-
-@router.get(
-    "/{product_id}",
-    response_model=ProductResponse,
-    summary="Get product by ID",
-    description="Retrieve product information by product ID.",
-)
-async def get_product(product_id: str) -> ProductResponse:
-    product = _products.get(product_id)
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-    return ProductResponse(**product)
-
 
 @router.get(
     "/project/{project_id}",
@@ -74,8 +51,8 @@ async def get_product(product_id: str) -> ProductResponse:
     summary="Get product by project ID",
     description="Retrieve product information associated with a project.",
 )
-async def get_product_by_project(project_id: str) -> ProductResponse:
-    for product in _products.values():
-        if product["project_id"] == project_id:
-            return ProductResponse(**product)
-    raise HTTPException(status_code=404, detail="Product not found for this project")
+async def get_product(project_id: str) -> ProductResponse:
+    p = get_product_by_project_id(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Product not found for this project")
+    return ProductResponse(**p)

@@ -119,6 +119,10 @@ def call_api(method: str, url: str, **kwargs) -> requests.Response:
     func = getattr(requests, method.lower())
     return func(url, **kwargs)
 
+def get_base_url() -> str:
+    """Return the user-configured API base without trailing slash."""
+    return st.session_state.get("base_url", DEFAULT_BASE_URL).rstrip("/")
+
 
 def build_payload(project, brand, product, assets, briefs, remove_bg, style_template):
     return {
@@ -145,7 +149,7 @@ def poll_job(base_url: str, job_id: str, max_wait: int = 180) -> dict | None:
     deadline = time.time() + max_wait
     while time.time() < deadline:
         try:
-            resp = call_api("get", f"{base_url}/ai/jobs/{job_id}")
+            resp = call_api("get", f"{base_url}/step4/jobs/{job_id}")
             if resp.status_code < 400:
                 data = resp.json()
                 if data.get("status") == "completed":
@@ -177,11 +181,75 @@ def get_image_bytes_from_result(image_data: dict) -> bytes | None:
 
 
 # ------------------------------------------------------------------ #
+#  Backend context guard                                             #
+# ------------------------------------------------------------------ #
+def ensure_backend_context() -> bool:
+    """
+    Make sure the FastAPI in-memory store has project, brand, and product
+    for the current project_id. Useful after backend reloads, which reset
+    the store and can cause Image 1 to fail with 404.
+    """
+    base_url = get_base_url()
+    project_id = st.session_state.get("project_id")
+    if not project_id:
+        st.error("Project ID missing. Please complete Steps 1–3 first.")
+        return False
+
+    try:
+        # Project
+        resp = call_api("get", f"{base_url}/step1/project/{project_id}")
+        if resp.status_code == 404:
+            proj_payload = _build_project_dict()
+            resp = call_api("post", f"{base_url}/step1/project/create", json=proj_payload)
+            if resp.status_code >= 400:
+                st.error(f"Unable to recreate project (HTTP {resp.status_code}): {resp.text}")
+                return False
+            project_id = resp.json().get("id")
+            st.session_state.project_id = project_id
+            st.session_state.generated_images = {}
+            st.session_state.job_ids = []
+            st.info("Backend was empty — recreated project context automatically.")
+        elif resp.status_code >= 400:
+            st.error(f"Project check failed (HTTP {resp.status_code}): {resp.text}")
+            return False
+
+        # Brand
+        resp = call_api("get", f"{base_url}/step2/brand/project/{project_id}")
+        if resp.status_code == 404:
+            brand_payload = {"project_id": project_id, "brand": _build_brand_dict()}
+            resp = call_api("post", f"{base_url}/step2/brand/save", json=brand_payload)
+            if resp.status_code >= 400:
+                st.error(f"Unable to re-save brand (HTTP {resp.status_code}): {resp.text}")
+                return False
+        elif resp.status_code >= 400:
+            st.error(f"Brand check failed (HTTP {resp.status_code}): {resp.text}")
+            return False
+
+        # Product
+        resp = call_api("get", f"{base_url}/step3/product/project/{project_id}")
+        if resp.status_code == 404:
+            prod_payload = {"project_id": project_id, "product": _build_product_dict()}
+            resp = call_api("post", f"{base_url}/step3/product/save", json=prod_payload)
+            if resp.status_code >= 400:
+                st.error(f"Unable to re-save product (HTTP {resp.status_code}): {resp.text}")
+                return False
+        elif resp.status_code >= 400:
+            st.error(f"Product check failed (HTTP {resp.status_code}): {resp.text}")
+            return False
+    except requests.RequestException as exc:
+        st.error(f"Connection error while checking backend context: {exc}")
+        return False
+
+    return True
+
+
+# ------------------------------------------------------------------ #
 #  Session state defaults                                             #
 # ------------------------------------------------------------------ #
 DEFAULTS = {
     "current_step": 1,
     "job_ids": [],
+    "project_id": None,
     # Step 1
     "project_name": "", "brand_name": "", "product_category": "", "target_marketplace": "",
     # Step 2
@@ -234,6 +302,68 @@ def go_back():
     st.session_state.current_step -= 1
 
 
+def submit_step1():
+    """Submit Project Setup to API."""
+    base_url = get_base_url()
+    payload = _build_project_dict()
+    try:
+        resp = call_api("post", f"{base_url}/step1/project/create", json=payload)
+        if resp.status_code >= 400:
+            st.error(f"Error {resp.status_code}: {resp.text}")
+            return
+        data = resp.json()
+        st.session_state.project_id = data.get("id")
+        st.success("✅ Project created!")
+        time.sleep(0.5)
+        go_next()
+    except Exception as e:
+        st.error(f"Connection error: {e}")
+
+def submit_step2():
+    """Submit Brand CI to API."""
+    base_url = get_base_url()
+    project_id = st.session_state.get("project_id")
+    if not project_id:
+        st.error("Project ID missing. Please go back to Step 1.")
+        return
+
+    brand_data = _build_brand_dict()
+    payload = {"project_id": project_id, "brand": brand_data}
+    
+    try:
+        resp = call_api("post", f"{base_url}/step2/brand/save", json=payload)
+        if resp.status_code >= 400:
+            st.error(f"Error {resp.status_code}: {resp.text}")
+            return
+        st.success("✅ Brand saved!")
+        time.sleep(0.5)
+        go_next()
+    except Exception as e:
+        st.error(f"Connection error: {e}")
+
+def submit_step3():
+    """Submit Product Info to API."""
+    base_url = get_base_url()
+    project_id = st.session_state.get("project_id")
+    if not project_id:
+        st.error("Project ID missing. Please go back to Step 1.")
+        return
+
+    product_data = _build_product_dict()
+    payload = {"project_id": project_id, "product": product_data}
+
+    try:
+        resp = call_api("post", f"{base_url}/step3/product/save", json=payload)
+        if resp.status_code >= 400:
+            st.error(f"Error {resp.status_code}: {resp.text}")
+            return
+        st.success("✅ Product info saved!")
+        time.sleep(0.5)
+        go_next()
+    except Exception as e:
+        st.error(f"Connection error: {e}")
+
+
 # ------------------------------------------------------------------ #
 #  Shared helpers — build project / brand / product dicts             #
 # ------------------------------------------------------------------ #
@@ -284,50 +414,97 @@ def _build_product_dict():
 def generate_single_image(slot_key: str, extra_instructions: str = "",
                           input_image_uploads: list | None = None,
                           emphasis_items: list | None = None):
-    """Call /ai/generate for one slot and poll until done. Stores result in session_state."""
-    base_url = st.session_state.get("base_url", DEFAULT_BASE_URL)
+    """Call specific /api/step4/generate/{slot_key} endpoint and poll job."""
+    base_url = get_base_url()
+    project_id = st.session_state.get("project_id")
+    if not project_id:
+        st.error("Project ID missing. Please complete Step 1 first.")
+        return
+    if not ensure_backend_context():
+        return
+    project_id = st.session_state.get("project_id")
 
-    project = _build_project_dict()
-    brand   = _build_brand_dict()
-    product = _build_product_dict()
-
-    # Build emphasis — prefer explicit emphasis_items, fallback to slot_facts
-    if emphasis_items is not None:
-        emphasis = [e for e in emphasis_items if e and e.strip()]
-    else:
-        facts = st.session_state.slot_facts.get(slot_key, [])
-        emphasis = [f for f in facts if f]
-
-    brief = {
-        "slot_name": slot_key,
-        "instructions": extra_instructions,
-        "emphasis": emphasis,
-        "style": st.session_state.slot_bg_style.get(slot_key, "Minimal"),
+    # Payload base
+    payload = {
+        "project_id": project_id,
+        "style_template": "playful", # Default or fetch from somewhere global if needed
     }
 
-    # Build assets list — product photo + any extra uploads
-    assets = []
-    main_upload = st.session_state.slot_uploads.get("main_product")
-    if main_upload:
-        assets.append({"type": "product_photo", "url": to_data_url(main_upload)})
-    if input_image_uploads:
-        for up in input_image_uploads:
-            if up:
-                assets.append({"type": "product_photo", "url": to_data_url(up)})
+    # Endpoint suffix mapping
+    endpoint_map = {
+        "main_product": "main-product",
+        "key_facts": "key-facts",
+        "lifestyle": "lifestyle",
+        "usps": "usps",
+        "comparison": "comparison",
+        "cross_selling": "cross-selling",
+        "closing": "closing",
+    }
+    suffix = endpoint_map.get(slot_key)
+    if not suffix:
+        st.error(f"Unknown slot: {slot_key}")
+        return
 
-    # For images after image 1, also pass previously generated image 1 as context
-    if slot_key != "main_product":
-        img1_data = st.session_state.generated_images.get("main_product")
-        if img1_data:
-            url = img1_data.get("image_url", "")
-            if url and url.startswith("data:"):
-                assets.append({"type": "product_photo", "url": url})
+    # Specific payload construction
+    if slot_key == "main_product":
+        main_upload = st.session_state.slot_uploads.get("main_product")
+        if not main_upload:
+            st.error("Please upload main product image.")
+            return
+        payload["image_url"] = to_data_url(main_upload)
 
-    payload = build_payload(project, brand, product, assets, [brief], True, "playful")
+    elif slot_key == "key_facts":
+        facts = emphasis_items if emphasis_items else st.session_state.slot_facts.get(slot_key, [])
+        payload["key_facts"] = [f for f in facts if f.strip()]
+        payload["background_style"] = st.session_state.slot_bg_style.get(slot_key, "Minimal")
+        payload["logo_position"] = st.session_state.slot_logo_pos.get(slot_key, "Top")
+
+    elif slot_key == "lifestyle":
+        # extract scenario from somewhere?
+        # In UI, scenario_desc is local variable inside step_image_setup.
+        # But generate_single_image called with extra_instructions which has it?
+        # extra_instructions has "Create a lifestyle scene: {scenario_desc}..."
+        # But API expects "scenario" string.
+        # I need to extract it or pass it explicitly.
+        # Current UI implementation: extra_instructions HAS the full prompt.
+        # New API expects dedicated field.
+        # Hack: Pass scenario as argument or global session state?
+        # Better: Since specific logic is inside this function now, I need specific arguments.
+        # But signature is generic.
+        # For lifestyle, "extra_instructions" was heavily formatted.
+        # I should change the calling code to pass arguments cleaner.
+        # OR parse it back? No.
+        # I will rely on `st.session_state.lifestyle_scenario` if stored.
+        # Let's check UI call site.
+        # UI: `scenario_desc = st.text_area(..., key="lifestyle_scenario")`
+        # So I can use `st.session_state.lifestyle_scenario`.
+        scenario = st.session_state.get("lifestyle_scenario", "")
+        payload["scenario"] = scenario
+        # Reference image
+        ref = st.session_state.slot_uploads.get("lifestyle")
+        if ref:
+             payload["ref_image_url"] = to_data_url(ref)
+
+    elif slot_key == "usps":
+        usps = emphasis_items if emphasis_items else st.session_state.slot_facts.get("usps", [])
+        payload["usps"] = [u for u in usps if u.strip()]
+
+    elif slot_key == "comparison":
+        payload["advantages"] = [a for a in st.session_state.get("advantages", []) if a.strip()]
+        payload["limitations"] = [l for l in st.session_state.get("limitations", []) if l.strip()]
+
+    elif slot_key == "cross_selling":
+        prods = emphasis_items if emphasis_items else st.session_state.get("cross_sell_products", [])
+        payload["product_names"] = [p for p in prods if p.strip()]
+
+    elif slot_key == "closing":
+        payload["direction"] = st.session_state.get("closing_direction", "Emotional")
+        payload["headline"] = st.session_state.get("closing_headline", "")
+
 
     with st.spinner(f"Generating {slot_key} image…"):
         try:
-            resp = call_api("post", f"{base_url}/ai/generate", json=payload)
+            resp = call_api("post", f"{base_url}/step4/generate/{suffix}", json=payload)
             if resp.status_code >= 400:
                 st.error(f"Error {resp.status_code}: {resp.text}")
                 return
@@ -351,41 +528,82 @@ def generate_single_image(slot_key: str, extra_instructions: str = "",
 #  Refine a single slot image                                         #
 # ------------------------------------------------------------------ #
 def refine_single_image(slot_key: str, feedback: str):
-    """Call /ai/refine for one slot and poll until done."""
-    base_url = st.session_state.get("base_url", DEFAULT_BASE_URL)
+    """Call specific /api/step4/refine/{slot_key} endpoint and poll job."""
+    base_url = get_base_url()
+    project_id = st.session_state.get("project_id")
+    if not project_id:
+        st.error("Project ID missing. Context lost.")
+        return
+    if not ensure_backend_context():
+        return
+    project_id = st.session_state.get("project_id")
 
-    project = _build_project_dict()
-    brand   = _build_brand_dict()
-    product = _build_product_dict()
-
-    facts = st.session_state.slot_facts.get(slot_key, [])
-    emphasis = [f for f in facts if f]
-
-    brief = {
-        "slot_name": slot_key,
-        "instructions": "",
-        "emphasis": emphasis,
-        "style": st.session_state.slot_bg_style.get(slot_key, "Minimal"),
+    # Payload base
+    payload = {
+        "project_id": project_id,
+        "style_template": "playful",
+        "feedback": feedback,
     }
 
-    assets = []
-    main_upload = st.session_state.slot_uploads.get("main_product")
-    if main_upload:
-        assets.append({"type": "product_photo", "url": to_data_url(main_upload)})
+    endpoint_map = {
+        "main_product": "main-product",
+        "key_facts": "key-facts",
+        "lifestyle": "lifestyle",
+        "usps": "usps",
+        "comparison": "comparison",
+        "cross_selling": "cross-selling",
+        "closing": "closing",
+    }
+    suffix = endpoint_map.get(slot_key)
+    if not suffix:
+        st.error(f"Unknown slot: {slot_key}")
+        return
 
-    # Also send the current generated image as context
-    existing = st.session_state.generated_images.get(slot_key)
-    if existing:
-        url = existing.get("image_url", "")
-        if url and url.startswith("data:"):
-            assets.append({"type": "product_photo", "url": url})
+    # Reconstruct payload fields needed for the request schema
+    if slot_key == "main_product":
+        main_upload = st.session_state.slot_uploads.get("main_product")
+        if main_upload:
+             payload["image_url"] = to_data_url(main_upload)
+        else:
+             # If strictly required by schema but we are refining, we might not have it if session reset?
+             # But session persists.
+             st.error("Main product upload missing.")
+             return
 
-    payload = build_payload(project, brand, product, assets, [brief], True, "playful")
-    body = {"feedback": feedback, "request": payload}
+    elif slot_key == "key_facts":
+        facts = st.session_state.slot_facts.get(slot_key, [])
+        payload["key_facts"] = [f for f in facts if f.strip()]
+        payload["background_style"] = st.session_state.slot_bg_style.get(slot_key, "Minimal")
+        payload["logo_position"] = st.session_state.slot_logo_pos.get(slot_key, "Top")
+
+    elif slot_key == "lifestyle":
+        scenario = st.session_state.get("lifestyle_scenario", "")
+        payload["scenario"] = scenario
+        ref = st.session_state.slot_uploads.get("lifestyle")
+        if ref:
+             payload["ref_image_url"] = to_data_url(ref)
+
+    elif slot_key == "usps":
+        usps = st.session_state.slot_facts.get("usps", [])
+        payload["usps"] = [u for u in usps if u.strip()]
+
+    elif slot_key == "comparison":
+        payload["advantages"] = [a for a in st.session_state.get("advantages", []) if a.strip()]
+        payload["limitations"] = [l for l in st.session_state.get("limitations", []) if l.strip()]
+
+    elif slot_key == "cross_selling":
+        prods = st.session_state.get("cross_sell_products", [])
+        payload["product_names"] = [p for p in prods if p.strip()]
+
+    elif slot_key == "closing":
+        payload["direction"] = st.session_state.get("closing_direction", "Emotional")
+        payload["headline"] = st.session_state.get("closing_headline", "")
+
 
     with st.spinner(f"Refining {slot_key} image…"):
         try:
-            resp = call_api("post", f"{base_url}/ai/refine", json=body)
+            # Note: RefineRequest is the body. It includes feedback + original fields.
+            resp = call_api("post", f"{base_url}/step4/refine/{suffix}", json=payload)
             if resp.status_code >= 400:
                 st.error(f"Error {resp.status_code}: {resp.text}")
                 return
@@ -498,7 +716,7 @@ def step_project_setup():
             st.session_state.product_category,
             st.session_state.target_marketplace,
         ])
-        st.button("Next →", key="next_1", on_click=go_next, disabled=not valid)
+        st.button("Next →", key="next_1", on_click=submit_step1, disabled=not valid)
 
 
 # ------------------------------------------------------------------ #
@@ -552,7 +770,7 @@ def step_brand_ci():
     with col_l:
         st.button("← Back", key="back_2", on_click=go_back)
     with col_r:
-        st.button("Next →", key="next_2", on_click=go_next)
+        st.button("Next →", key="next_2", on_click=submit_step2)
 
 
 # ------------------------------------------------------------------ #
@@ -616,7 +834,7 @@ def step_product_info():
         st.button("← Back", key="back_3", on_click=go_back)
     with col_r:
         valid = all([st.session_state.sku, st.session_state.product_title, st.session_state.short_desc])
-        st.button("Continue to Image Setup →", key="next_3", on_click=go_next, disabled=not valid)
+        st.button("Continue to Image Setup →", key="next_3", on_click=submit_step3, disabled=not valid)
 
 
 # ------------------------------------------------------------------ #
@@ -1058,10 +1276,11 @@ page = st.sidebar.radio("Page", ["Generate", "Jobs"], label_visibility="collapse
 
 if page == "Jobs":
     st.title("Job Status")
+    base_url = get_base_url()
     if st.session_state.job_ids:
         job_id = st.selectbox("Job ID", st.session_state.job_ids)
         if st.button("Refresh job status") and job_id:
-            resp = call_api("get", f"{st.session_state['base_url']}/ai/jobs/{job_id}")
+            resp = call_api("get", f"{base_url}/step4/jobs/{job_id}")
             if resp.status_code >= 400:
                 st.error(f"Error {resp.status_code}: {resp.text}")
             else:

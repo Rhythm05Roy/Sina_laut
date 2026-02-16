@@ -1,73 +1,63 @@
 """
 Step 1 — Project Setup API routes.
-Manages project creation, retrieval, and updates.
 """
-
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
-from typing import Dict, List, Optional
+from contextlib import asynccontextmanager
+from typing import List, Dict
 from uuid import uuid4
 
 from app.schemas.project import ProjectSetup, Marketplace
+from app.core.store import projects  # Shared store
+from pydantic import BaseModel
 
-router = APIRouter(prefix="/project", tags=["Step 1 — Project Setup"])
+# Explicitly named "Step 1" route prefix
+router = APIRouter(prefix="/step1/project", tags=["Step 1 — Project Setup"])
 
-# In-memory store (swap for DB in production)
-_projects: Dict[str, dict] = {}
-
-
-class ProjectCreateResponse(BaseModel):
+class ProjectCreateResponse(ProjectSetup):
     id: str
-    project_name: str
-    brand_name: str
-    product_category: str
-    target_marketplaces: List[Marketplace]
-    message: str = "Project created successfully"
-
+    message: str = "Project created successfully. Proceed to Step 2."
 
 class ProjectListResponse(BaseModel):
     projects: List[ProjectCreateResponse]
     total: int
 
 
+
 @router.post(
     "/create",
     response_model=ProjectCreateResponse,
     status_code=201,
-    summary="Create a new project",
-    description=(
-        "Creates a new image generation project with brand name, category, and target marketplaces. "
-        "This is the first step in the wizard flow."
-    ),
+    summary="Create Project",
+    description="Step 1: Create a new project. Returns project ID required for subsequent steps.",
 )
 async def create_project(payload: ProjectSetup) -> ProjectCreateResponse:
     project_id = str(uuid4())
-    _projects[project_id] = {
+    # Save to shared store
+    projects[project_id] = {
         "id": project_id,
         **payload.model_dump(),
     }
     return ProjectCreateResponse(id=project_id, **payload.model_dump())
 
-
 @router.get(
     "/{project_id}",
     response_model=ProjectCreateResponse,
-    summary="Get project by ID",
-    description="Retrieve a project's configuration by its unique ID.",
+    summary="Get Project",
 )
 async def get_project(project_id: str) -> ProjectCreateResponse:
-    project = _projects.get(project_id)
-    if not project:
+    p = projects.get(project_id)
+    if not p:
         raise HTTPException(status_code=404, detail="Project not found")
-    return ProjectCreateResponse(**project)
-
+    return ProjectCreateResponse(**p)
 
 @router.get(
     "/",
     response_model=ProjectListResponse,
-    summary="List all projects",
-    description="Retrieve all projects in the system.",
+    summary="List Projects",
 )
 async def list_projects() -> ProjectListResponse:
-    projects = [ProjectCreateResponse(**p) for p in _projects.values()]
-    return ProjectListResponse(projects=projects, total=len(projects))
+    # Convert dicts back to models
+    items = []
+    for p in projects.values():
+        items.append(ProjectCreateResponse(**p))
+    return ProjectListResponse(projects=items, total=len(items))
