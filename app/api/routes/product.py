@@ -2,7 +2,7 @@
 Step 3 — Product Information API routes.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Body
 from pydantic import BaseModel, Field
 from typing import Dict, List
 from uuid import uuid4
@@ -32,7 +32,27 @@ class ProductResponse(ProductInfo):
         "This corresponds to Step 3 of the wizard."
     ),
 )
-async def save_product(payload: ProductCreateRequest) -> ProductResponse:
+async def save_product(
+    payload: ProductCreateRequest = Body(
+        ...,
+        examples={
+            "default": {
+                "summary": "Running shoe product",
+                "value": {
+                    "project_id": "PROJECT_ID_FROM_STEP1",
+                    "product": {
+                        "sku": "SKU-1",
+                        "title": "Air Runner",
+                        "short_description": "Lightweight running shoe",
+                        "usps": ["Lightweight", "Breathable", "Cushioned"],
+                        "keywords": {"primary": [], "secondary": []},
+                        "languages": ["en"]
+                    }
+                }
+            }
+        }
+    )
+) -> ProductResponse:
     if payload.project_id not in projects:
         raise HTTPException(status_code=404, detail="Project ID not found")
         

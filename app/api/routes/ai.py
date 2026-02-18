@@ -4,6 +4,9 @@ Step 4 — Image Generation & Refinement API routes.
 
 from fastapi import APIRouter, Depends, HTTPException, Body
 from typing import List, Optional
+import base64
+import mimetypes
+from pathlib import Path
 
 from app.api.deps import get_image_generation_service, get_job_store
 from app.schemas.generation import ImageGenerationRequest, GenerationResponse, Asset
@@ -47,6 +50,25 @@ def build_base_request(project_id: str) -> tuple[ProjectSetup, BrandCI, ProductI
         raise HTTPException(status_code=404, detail="Product info not found. Complete Step 3.")
         
     return ProjectSetup(**proj_data), BrandCI(**brand_data), ProductInfo(**prod_data)
+
+
+def normalize_image_url(maybe_path: str) -> str:
+    """
+    Accepts data URL, http(s) URL, or local file path.
+    If it's a local file path, read and convert to data URL.
+    """
+    if not maybe_path:
+        return maybe_path
+    lower = maybe_path.lower()
+    if lower.startswith("data:") or lower.startswith("http://") or lower.startswith("https://"):
+        return maybe_path
+    path = Path(maybe_path)
+    if path.exists() and path.is_file():
+        mime, _ = mimetypes.guess_type(path.name)
+        mime = mime or "application/octet-stream"
+        b64 = base64.b64encode(path.read_bytes()).decode("ascii")
+        return f"data:{mime};base64,{b64}"
+    return maybe_path
 
 
 async def _run_generation(
@@ -173,11 +195,32 @@ async def _run_refinement(
 # 1. Main Product
 @router.post("/generate/main-product", response_model=GenerationResponse, summary="1. Generate Main Product")
 async def generate_image1(
-    payload: Image1Request,
+    payload: Image1Request = Body(
+        ...,
+        examples={
+            "default": {
+                "summary": "Main product image (white background)",
+                "value": {
+                    "project_id": "PROJECT_ID_FROM_STEP1",
+                    "style_template": "minimal",
+                    "image_url": "data:image/png;base64,REPLACE_WITH_REAL_BASE64_IMAGE"
+                }
+            },
+            "local_file": {
+                "summary": "Local file path (auto-converted to data URL)",
+                "value": {
+                    "project_id": "PROJECT_ID_FROM_STEP1",
+                    "style_template": "minimal",
+                    "image_url": "C:\\\\Users\\\\YourName\\\\Pictures\\\\product.png"
+                }
+            }
+        }
+    ),
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
-    save_asset_url(payload.project_id, "main_raw", payload.image_url)
-    assets = [Asset(type="product_photo", url=payload.image_url)]
+    normalized = normalize_image_url(payload.image_url)
+    save_asset_url(payload.project_id, "main_raw", normalized)
+    assets = [Asset(type="product_photo", url=normalized)]
     resp = await _run_generation(
         generator, payload.project_id, "main_product",
         instructions="Create a marketplace-ready product image. Pure white background. Product centered. No text.",
@@ -322,7 +365,8 @@ async def refine_image1(
     payload: Image1RefineRequest,
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
-    assets = [Asset(type="product_photo", url=payload.image_url)]
+    normalized = normalize_image_url(payload.image_url)
+    assets = [Asset(type="product_photo", url=normalized)]
     return await _run_refinement(
         generator, payload.project_id, "main_product",
         instructions="Create a marketplace-ready product image. Pure white background. Product centered. No text.",

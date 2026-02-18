@@ -1,7 +1,7 @@
 """
 Step 1 — Project Setup API routes.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Body
 from contextlib import asynccontextmanager
 from typing import List, Dict
 from uuid import uuid4
@@ -30,7 +30,22 @@ class ProjectListResponse(BaseModel):
     summary="Create Project",
     description="Step 1: Create a new project. Returns project ID required for subsequent steps.",
 )
-async def create_project(payload: ProjectSetup) -> ProjectCreateResponse:
+async def create_project(
+    payload: ProjectSetup = Body(
+        ...,
+        examples={
+            "default": {
+                "summary": "Basic project",
+                "value": {
+                    "project_name": "Air Runner Campaign",
+                    "brand_name": "TestBrand",
+                    "product_category": "Running Shoes",
+                    "target_marketplaces": ["amazon"]
+                },
+            }
+        }
+    )
+) -> ProjectCreateResponse:
     project_id = str(uuid4())
     # Save to shared store
     projects[project_id] = {

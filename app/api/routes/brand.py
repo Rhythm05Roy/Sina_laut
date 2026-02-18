@@ -1,7 +1,7 @@
 """
 Step 2 — Brand CI API routes.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Body
 from pydantic import BaseModel, Field
 from typing import Optional
 from uuid import uuid4
@@ -27,7 +27,26 @@ class BrandResponse(BrandCI):
     summary="Save Brand CI",
     description="Step 2: Configure brand identity for a project.",
 )
-async def save_brand(payload: BrandCreateRequest) -> BrandResponse:
+async def save_brand(
+    payload: BrandCreateRequest = Body(
+        ...,
+        examples={
+            "default": {
+                "summary": "Brand colors and fonts",
+                "value": {
+                    "project_id": "PROJECT_ID_FROM_STEP1",
+                    "brand": {
+                        "logo_url": None,
+                        "primary_color": "#111111",
+                        "secondary_color": "#222222",
+                        "font_heading": "Inter",
+                        "font_body": "Roboto"
+                    }
+                }
+            }
+        }
+    )
+) -> BrandResponse:
     # Verify project exists
     if payload.project_id not in projects:
         raise HTTPException(status_code=404, detail="Project ID not found. Complete Step 1 first.")
