@@ -66,7 +66,7 @@ def _main_product_prompt(project, brand, product, brief) -> str:
         f"Pure white background (#FFFFFF). Product centered, filling 85% of frame. "
         f"Clean, sharp edges. Soft natural shadow beneath product. "
         f"Shot with 85mm lens, f/11, even studio lighting. "
-        f"No text, no logos, no badges, no decorations. "
+        f"No added text, no added logos, no badges, no decorations. Preserve all original on-product branding/labels/text exactly as in the photo. "
         f"Amazon marketplace compliant hero image. Ultra-sharp detail, production-ready."
     )
 
