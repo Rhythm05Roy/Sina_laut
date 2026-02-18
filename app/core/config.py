@@ -17,12 +17,12 @@ class Settings(BaseSettings):
 
     # ── Primary AI Provider: Google Gemini ──
     gemini_api_key: Optional[str] = None
-    gemini_model: str = "gemini-2.0-flash-exp-image-generation"
+    gemini_model: str = "gemini-2.5-flash-image"
     gemini_base_url: HttpUrl = "https://generativelanguage.googleapis.com/v1beta"
 
     # ── Legacy aliases (backwards compatible with existing .env files) ──
     nano_banana_api_key: Optional[str] = None
-    nano_banana_model: str = "gemini-2.0-flash-exp-image-generation"
+    nano_banana_model: str = "gemini-2.5-flash-image"
     nano_banana_base_url: HttpUrl = "https://generativelanguage.googleapis.com/v1beta"
 
     # ── Future providers (ready for backend team to plug in) ──

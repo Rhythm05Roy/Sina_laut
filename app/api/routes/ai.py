@@ -7,6 +7,7 @@ from typing import List, Optional
 
 from app.api.deps import get_image_generation_service, get_job_store
 from app.schemas.generation import ImageGenerationRequest, GenerationResponse, Asset
+from app.schemas.style_template import StyleTemplate
 from app.schemas.feedback import FeedbackRequest, FeedbackResponse
 from app.schemas.image import GenerationStatus, ImageBrief
 from app.schemas.project import ProjectSetup
@@ -19,6 +20,7 @@ from app.core.store import (
     save_generated_image_url, get_generated_image_url,
     save_asset_url, get_asset_url
 )
+from app.services.slots import build_followup_suggestions
 from app.schemas.step4 import (
     Image1Request, Image2Request, Image3Request, Image4Request,
     Image5Request, Image6Request, Image7Request,
@@ -60,6 +62,12 @@ async def _run_generation(
     
     project, brand, product = build_base_request(project_id)
     
+    # Convert string to StyleTemplate enum
+    try:
+        style_enum = StyleTemplate(style_template)
+    except ValueError:
+        style_enum = StyleTemplate.PLAYFUL
+    
     brief = ImageBrief(
         slot_name=slot_name,
         instructions=instructions,
@@ -74,10 +82,10 @@ async def _run_generation(
         assets=assets,
         image_briefs=[brief],
         remove_background=remove_background,
-        style_template=style_template
+        style_template=style_enum
     )
     
-    job_id = await generator.generate(full_req)
+    job_id, analysis_meta = await generator.generate(full_req)
     
     # Check if done immediately (blocking implementation)
     job = generator.get_status(job_id)
@@ -86,7 +94,15 @@ async def _run_generation(
         if img_url:
             save_generated_image_url(project_id, slot_name, img_url)
 
-    return GenerationResponse(job_id=job_id, status="queued")
+    return GenerationResponse(
+        job_id=job_id,
+        status="queued" if not analysis_meta.get("placeholder_used") else "failed",
+        analysis_used=analysis_meta.get("analysis_used"),
+        analysis_ok=analysis_meta.get("analysis_ok"),
+        analysis_text=analysis_meta.get("analysis_text"),
+        placeholder_used=analysis_meta.get("placeholder_used"),
+        error=analysis_meta.get("error"),
+    )
 
 
 async def _run_refinement(
@@ -102,6 +118,12 @@ async def _run_refinement(
 ) -> GenerationResponse:
 
     project, brand, product = build_base_request(project_id)
+
+    # Convert string to StyleTemplate enum
+    try:
+        style_enum = StyleTemplate(style_template)
+    except ValueError:
+        style_enum = StyleTemplate.PLAYFUL
 
     # Context: Previously generated image for this slot
     prev_img = get_generated_image_url(project_id, slot_name)
@@ -123,10 +145,10 @@ async def _run_refinement(
         assets=assets,
         image_briefs=[brief],
         remove_background=remove_background,
-        style_template=style_template
+        style_template=style_enum
     )
 
-    job_id = await generator.refine(full_req, feedback)
+    job_id, analysis_meta = await generator.refine(full_req, feedback)
 
     # Check if done immediately
     job = generator.get_status(job_id)
@@ -135,7 +157,15 @@ async def _run_refinement(
         if img_url:
             save_generated_image_url(project_id, slot_name, img_url)
 
-    return GenerationResponse(job_id=job_id, status="queued")
+    return GenerationResponse(
+        job_id=job_id,
+        status="queued" if not analysis_meta.get("placeholder_used") else "failed",
+        analysis_used=analysis_meta.get("analysis_used"),
+        analysis_ok=analysis_meta.get("analysis_ok"),
+        analysis_text=analysis_meta.get("analysis_text"),
+        placeholder_used=analysis_meta.get("placeholder_used"),
+        error=analysis_meta.get("error"),
+    )
 
 
 # --- GENERATION ENDPOINTS ---
@@ -148,13 +178,23 @@ async def generate_image1(
 ):
     save_asset_url(payload.project_id, "main_raw", payload.image_url)
     assets = [Asset(type="product_photo", url=payload.image_url)]
-    return await _run_generation(
+    resp = await _run_generation(
         generator, payload.project_id, "main_product",
         instructions="Create a marketplace-ready product image. Pure white background. Product centered. No text.",
         assets=assets,
         style_template=payload.style_template,
         remove_background=True
     )
+    # Auto-suggest prompts for downstream slots using current context
+    try:
+        project, brand, product = build_base_request(payload.project_id)
+        resp.suggested_prompts = build_followup_suggestions(
+            project, brand, product, payload.image_url, payload.style_template
+        )
+    except Exception:
+        # Non-fatal: suggestions are optional
+        resp.suggested_prompts = None
+    return resp
 
 # 2. Key Facts
 @router.post("/generate/key-facts", response_model=GenerationResponse, summary="2. Generate Key Facts")

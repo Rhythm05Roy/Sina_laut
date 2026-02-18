@@ -194,3 +194,83 @@ def slot_default(slot_name: str) -> str:
 def get_slot_title(slot_name: str) -> str:
     """Get display title for a slot."""
     return SLOT_TEMPLATES.get(slot_name, {}).get("title", slot_name)
+
+
+def build_followup_suggestions(project, brand, product, main_image_url: str | None = None, style_template: str = "playful") -> dict:
+    """
+    Create lightweight, human-readable prompt seeds for slots 2-7
+    using the uploaded main product photo + stored context.
+    This is heuristic (no real vision analysis) but keeps prompts consistent.
+    """
+    cat = getattr(project, "product_category", "") or getattr(product, "product_category", "") or "the product"
+
+    # Helpers
+    def top_items(items, n=4):
+        return [i for i in items if i][:n]
+
+    key_facts = top_items(product.usps, 4) or [
+        f"Crisp detail of {cat}",
+        "Highlight build quality",
+        "Show key accessory in frame",
+        "Emphasize scale/size clearly",
+    ]
+
+    lifestyle_scene = (
+        f"{product.title} being used naturally in a setting that matches its category ({cat}). "
+        "Keep product as hero; warm, realistic lighting. Use the uploaded main product photo as reference."
+    )
+
+    usp_list = top_items(product.usps, 4) or key_facts
+
+    advantages = usp_list[:3] or ["Premium build", "Easy setup", "Trusted brand"]
+    limitations = ["Generic alternatives feel cheaper", "Shorter warranty elsewhere", "Inconsistent reviews"]
+
+    cross_sell = [
+        f"{cat} - bundle pack",
+        f"{cat} - travel size",
+        f"{cat} - premium edition",
+        f"{cat} - accessory A",
+        f"{cat} - accessory B",
+        f"{cat} - gift set",
+    ]
+
+    closing_headline = f"{project.brand_name}: Ready for {project.product_category} excellence?"
+
+    return {
+        "key_facts": {
+            "facts": key_facts,
+            "prompt": (
+                "Product left, four branded fact cards on right. "
+                f"Use main product photo{' '+main_image_url if main_image_url else ''} as reference. "
+                f"Style {style_template}. Facts: {', '.join(key_facts)}."
+            )
+        },
+        "lifestyle": {
+            "scenario": lifestyle_scene,
+            "prompt": f"Lifestyle scene: {lifestyle_scene}"
+        },
+        "usps": {
+            "usps": usp_list,
+            "prompt": f"Center product; surround with callouts for: {', '.join(usp_list)}."
+        },
+        "comparison": {
+            "advantages": advantages,
+            "limitations": limitations,
+            "prompt": (
+                "Split left/right. Left = Our Product (green) with advantages. "
+                "Right = Others (red) with limitations. "
+                f"Advantages: {', '.join(advantages)}. Limitations: {', '.join(limitations)}."
+            )
+        },
+        "cross_selling": {
+            "product_names": cross_sell,
+            "prompt": f"3x2 grid of related items. Include: {', '.join(cross_sell)}."
+        },
+        "closing": {
+            "headline": closing_headline,
+            "prompt": (
+                f"Final emotional image, direction: Emotional. "
+                f'Headline: "{closing_headline}". Brand colors {brand.primary_color}/{brand.secondary_color}.'
+            )
+        }
+    }

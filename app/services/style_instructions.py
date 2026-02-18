@@ -17,13 +17,13 @@ from app.schemas.style_template import StyleTemplate
 STYLE_LAYOUTS: Dict[str, Dict[str, str]] = {
     StyleTemplate.PLAYFUL: {
         "name": "Playful",
-        "description": "Vibrant, colorful style inspired by Playmobil marketing",
+        "description": "Vibrant, colorful style with rounded shapes and friendly gradients",
         
         "logo_instructions": (
             "LOGO PLACEMENT: "
-            "- Place the brand logo CENTERED at the TOP of the image. "
-            "- Logo should be prominent and clearly visible. "
-            "- If a sub-brand logo exists (e.g., 'myLife'), place it directly below the main logo. "
+            "- Place the brand logo where it best balances the composition (top-center by default; shift to a corner if needed to avoid overlap). "
+            "- Logo should be prominent and clearly visible if provided. "
+            "- If no logo is supplied, leave the area empty (do NOT invent a logo). "
             "- Maintain generous padding around logos (about 5% from top edge)."
         ),
         
@@ -32,6 +32,7 @@ STYLE_LAYOUTS: Dict[str, Dict[str, str]] = {
             "- Create exactly 4 CIRCULAR badges arranged in a horizontal row at the BOTTOM of the image. "
             "- Each badge should have: a solid colored background using brand colors, a small ICON, and brief TEXT (1-3 words). "
             "- Badge content should include: Age rating (e.g., '4+'), Piece count (e.g., '72 pieces'), Key feature icons. "
+            "- If you cannot render text cleanly, leave the badge text BLANK rather than inventing or garbling characters. "
             "- Badges should have a slight drop shadow for depth. "
             "- Use alternating brand primary and secondary colors for badges. "
             "- Badge size should be consistent, approximately 80-100px diameter equivalent."
@@ -195,6 +196,9 @@ def get_style_instructions(style: StyleTemplate, slot_name: str) -> str:
     Returns:
         Complete layout instruction string for the prompt
     """
+    # For main product, avoid overlay/layout instructions entirely.
+    if slot_name == "main_product":
+        return ""
     layout = STYLE_LAYOUTS.get(style, STYLE_LAYOUTS[StyleTemplate.PLAYFUL])
     
     # Combine all layout instructions

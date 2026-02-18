@@ -71,7 +71,7 @@ app.include_router(ai.router, prefix=settings.api_prefix)
 
 
 @app.get("/", tags=["system"])
-async def root() -> dict[str, str]:
+async def root():
     return {
         "message": f"{settings.app_name} v{settings.version} running",
         "docs": "/docs",

@@ -244,6 +244,55 @@ def ensure_backend_context() -> bool:
 
 
 # ------------------------------------------------------------------ #
+#  Suggestions from backend (auto-populate later steps)              #
+# ------------------------------------------------------------------ #
+def apply_suggested_prompts(suggestions: dict | None):
+    if not suggestions:
+        return
+
+    # Key Facts
+    kf = suggestions.get("key_facts", {})
+    facts = kf.get("facts") or []
+    if facts:
+        st.session_state.slot_facts["key_facts"] = facts[:4]
+        st.session_state.slot_bg_style["key_facts"] = st.session_state.slot_bg_style.get("key_facts", "Minimal")
+        st.session_state.slot_logo_pos["key_facts"] = st.session_state.slot_logo_pos.get("key_facts", "Top")
+
+    # Lifestyle
+    ls = suggestions.get("lifestyle", {})
+    scenario = ls.get("scenario")
+    if scenario:
+        st.session_state.lifestyle_scenario = scenario
+
+    # USPs
+    usp = suggestions.get("usps", {})
+    usp_list = usp.get("usps") or []
+    if usp_list:
+        st.session_state.slot_facts["usps"] = usp_list[:4]
+
+    # Comparison
+    comp = suggestions.get("comparison", {})
+    adv = comp.get("advantages") or []
+    lim = comp.get("limitations") or []
+    if adv:
+        st.session_state.advantages = adv[:3]
+    if lim:
+        st.session_state.limitations = lim[:3]
+
+    # Cross-selling
+    cs = suggestions.get("cross_selling", {})
+    cs_items = cs.get("product_names") or []
+    if cs_items:
+        st.session_state.cross_sell_products = cs_items[:6]
+
+    # Closing
+    cl = suggestions.get("closing", {})
+    headline = cl.get("headline")
+    if headline:
+        st.session_state.closing_headline = headline
+
+
+# ------------------------------------------------------------------ #
 #  Session state defaults                                             #
 # ------------------------------------------------------------------ #
 DEFAULTS = {
@@ -509,6 +558,8 @@ def generate_single_image(slot_key: str, extra_instructions: str = "",
                 st.error(f"Error {resp.status_code}: {resp.text}")
                 return
             data = resp.json()
+            if slot_key == "main_product":
+                apply_suggested_prompts(data.get("suggested_prompts"))
             job_id = data.get("job_id")
             if job_id:
                 st.session_state.job_ids.append(job_id)

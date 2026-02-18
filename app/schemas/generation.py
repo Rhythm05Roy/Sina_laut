@@ -28,3 +28,27 @@ class ImageGenerationRequest(BaseModel):
 class GenerationResponse(BaseModel):
     job_id: str
     status: str
+    suggested_prompts: dict | None = Field(
+        default=None,
+        description="Optional prompt suggestions for downstream slots (key_facts, lifestyle, etc.)"
+    )
+    analysis_used: bool | None = Field(
+        default=None,
+        description="Whether OpenAI vision analysis was attempted for this request."
+    )
+    analysis_ok: bool | None = Field(
+        default=None,
+        description="Whether vision analysis succeeded."
+    )
+    analysis_text: str | None = Field(
+        default=None,
+        description="Guidance text produced by vision analysis (if available)."
+    )
+    placeholder_used: bool | None = Field(
+        default=None,
+        description="True if a placeholder image was returned instead of a real generation."
+    )
+    error: str | None = Field(
+        default=None,
+        description="Optional error/warning message from the generation step."
+    )
