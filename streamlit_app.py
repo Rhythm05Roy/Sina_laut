@@ -9,8 +9,8 @@ import streamlit as st
 
 # ---------- Config ----------
 st.set_page_config(page_title="Sina Laut AI", layout="wide")
-# DEFAULT_BASE_URL = "http://127.0.0.1:8000/api"
-DEFAULT_BASE_URL = "https://sina-laut-ai.onrender.com/api"
+DEFAULT_BASE_URL = "http://127.0.0.1:8000/api"
+# DEFAULT_BASE_URL = "https://sina-laut-ai.onrender.com/api"
 
 
 SLOTS = [

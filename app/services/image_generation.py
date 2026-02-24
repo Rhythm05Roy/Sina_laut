@@ -53,7 +53,12 @@ class ImageGenerationService:
                     cleaned_url, changed = asset.url, False
                 processed_assets.append((asset.type, cleaned_url, changed))
 
-            keywords = await crawl_keywords(payload.product)
+            keywords = await crawl_keywords(
+                payload.product,
+                category=payload.project.product_category,
+                marketplace=payload.project.target_marketplaces[0] if payload.project.target_marketplaces else "amazon",
+                analysis=None,
+            )
 
             input_images: List[str] = [cleaned for _, cleaned, _ in processed_assets if cleaned]
             if payload.brand.logo_url:
@@ -159,7 +164,12 @@ class ImageGenerationService:
 
         try:
             await self.ai_client.ensure_ready()
-            keywords = await crawl_keywords(payload.product)
+            keywords = await crawl_keywords(
+                payload.product,
+                category=payload.project.product_category,
+                marketplace=payload.project.target_marketplaces[0] if payload.project.target_marketplaces else "amazon",
+                analysis=None,
+            )
 
             input_images: List[str] = [asset.url for asset in payload.assets if asset.url]
             if payload.brand.logo_url:

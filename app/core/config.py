@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     stability_api_key: Optional[str] = None
     replicate_api_key: Optional[str] = None
+    # DataForSEO credentials (basic auth)
+    dataforseo_login: Optional[str] = None
+    dataforseo_password: Optional[str] = None
 
     # ── Image output settings ──
     image_size: str = "1024x1024"

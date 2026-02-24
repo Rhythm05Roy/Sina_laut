@@ -15,6 +15,13 @@ from app.schemas.image import ImageBrief
 from app.schemas.style_template import StyleTemplate
 from app.services.slots import slot_default
 
+# Helper to join keyword-driven statements deterministically
+def _benefit_lines(keywords: List[str], count: int, prefix: str) -> str:
+    lines = []
+    for kw in keywords[:count]:
+        lines.append(f"{prefix} {kw}".strip())
+    return "; ".join(lines)
+
 
 def build_prompt(
     project: ProjectSetup,
@@ -38,17 +45,17 @@ def build_prompt(
     if slot == "main_product":
         prompt = _main_product_prompt(project, brand, product, brief)
     elif slot == "key_facts":
-        prompt = _key_facts_prompt(project, brand, product, brief)
+        prompt = _key_facts_prompt(project, brand, product, brief, keywords)
     elif slot == "lifestyle":
-        prompt = _lifestyle_prompt(project, brand, product, brief)
+        prompt = _lifestyle_prompt(project, brand, product, brief, keywords)
     elif slot == "usps":
-        prompt = _usps_prompt(project, brand, product, brief)
+        prompt = _usps_prompt(project, brand, product, brief, keywords)
     elif slot == "comparison":
-        prompt = _comparison_prompt(project, brand, product, brief)
+        prompt = _comparison_prompt(project, brand, product, brief, keywords)
     elif slot == "cross_selling":
         prompt = _cross_selling_prompt(project, brand, product, brief)
     elif slot == "closing":
-        prompt = _closing_prompt(project, brand, product, brief)
+        prompt = _closing_prompt(project, brand, product, brief, keywords)
     else:
         prompt = _generic_prompt(project, brand, product, brief)
 
@@ -71,29 +78,55 @@ def _main_product_prompt(project, brand, product, brief) -> str:
     )
 
 
-def _key_facts_prompt(project, brand, product, brief) -> str:
+def _key_facts_prompt(project, brand, product, brief, keywords) -> str:
     """Key facts: product with info cards layout."""
     facts = brief.emphasis[:4] if brief.emphasis else product.usps[:4]
-    facts_text = ", ".join(f'"{f}"' for f in facts if f) if facts else "key product features"
+    visual_kws = keywords.get("clean_visual") or keywords.get("primary", [])
+    # Build four short benefit lines (max 3 words each), drop intent-y terms
+    benefit_lines = []
+    for kw in visual_kws:
+        if any(t in kw for t in ["buy", "deal", "price", "offer", "cheap"]):
+            continue
+        words = kw.split()[:3]
+        phrase = " ".join(words).strip()
+        if phrase and phrase not in benefit_lines:
+            benefit_lines.append(phrase)
+        if len(benefit_lines) >= 4:
+            break
+    if not benefit_lines:
+        benefit_lines = [f for f in facts if f][:4]
+    facts_text = "; ".join(benefit_lines) if benefit_lines else "key product features"
 
     return (
         f"Professional product infographic for {product.title} by {project.brand_name}. "
         f"Clean marketing layout on a professional background. "
-        f"Product image prominently displayed on the left side. "
-        f"On the right side, {len(facts) if facts else 4} clean rectangular info cards with key facts: {facts_text}. "
+        f"Product image prominently displayed. "
+        f"{facts_text}. "
         f"Brand colors: {brand.primary_color} primary, {brand.secondary_color} secondary. "
         f"Clean sans-serif typography. Professional e-commerce infographic quality. "
         f"Render text exactly as provided, do not invent text."
     )
 
 
-def _lifestyle_prompt(project, brand, product, brief) -> str:
+def _lifestyle_prompt(project, brand, product, brief, keywords) -> str:
     """Lifestyle: product in real-world scenario."""
     scenario = brief.instructions or "being used naturally in an appropriate real-world setting"
+    secondary = keywords.get("clean_visual") or keywords.get("secondary", [])
+    claims = []
+    for kw in secondary:
+        if any(t in kw for t in ["buy", "deal", "price", "offer", "cheap"]):
+            continue
+        phrase = " ".join(kw.split()[:3]).strip()
+        if phrase and phrase not in claims:
+            claims.append(phrase)
+        if len(claims) >= 3:
+            break
+    claims_text = "; ".join(claims) if claims else ""
 
     return (
         f"Professional lifestyle photography of {product.title}. "
         f"{scenario}. "
+        f"{f'Contextual claims: {claims_text}. ' if claims_text else ''}"
         f"Product is the hero of the scene, clearly visible and recognizable. "
         f"Professional studio-quality warm natural lighting, shallow depth of field. "
         f"High-end commercial photography aesthetic. Realistic, aspirational. "
@@ -101,30 +134,50 @@ def _lifestyle_prompt(project, brand, product, brief) -> str:
     )
 
 
-def _usps_prompt(project, brand, product, brief) -> str:
+def _usps_prompt(project, brand, product, brief, keywords) -> str:
     """USP highlight: product with callouts around it."""
-    usps = brief.emphasis[:4] if brief.emphasis else product.usps[:4]
-    usps_text = ", ".join(f'"{u}"' for u in usps if u) if usps else "unique features"
+    primary = keywords.get("clean_visual") or keywords.get("primary", [])
+    usps = primary[:3] if primary else (brief.emphasis[:3] if brief.emphasis else product.usps[:3])
+    usps_text = "; ".join(u for u in usps if u) if usps else "unique features"
 
     return (
         f"Professional USP highlight infographic for {product.title} by {project.brand_name}. "
         f"Product centered in the composition. "
-        f"3-4 clean callout cards arranged around the product with these exact USP texts: {usps_text}. "
-        f"Each callout has a small icon and the text in clean sans-serif font. "
+        f"3 clean callout texts arranged around the product with these exact USPs: {usps_text}. "
+        f"Text-only callouts in clean sans-serif font; no icons unless provided. "
         f"Brand colors: {brand.primary_color} primary, {brand.secondary_color} secondary. "
         f"Clean gradient background. Professional marketing layout. "
         f"Only render the exact text provided."
     )
 
 
-def _comparison_prompt(project, brand, product, brief) -> str:
+def _comparison_prompt(project, brand, product, brief, keywords) -> str:
     """Comparison: split layout with advantages vs limitations."""
-    emphasis = brief.emphasis or []
-    advantages = [e.replace("ADV:", "") for e in emphasis if e.startswith("ADV:")]
-    limitations = [e.replace("LIM:", "") for e in emphasis if e.startswith("LIM:")]
+    primary = keywords.get("clean_visual") or keywords.get("primary", [])
+    secondary = keywords.get("clean_visual") or keywords.get("secondary", [])
 
-    adv_text = ", ".join(f'"{a}"' for a in advantages) if advantages else '"Premium quality", "Easy setup"'
-    lim_text = ", ".join(f'"{l}"' for l in limitations) if limitations else '"Generic alternative", "Lower quality"'
+    adv = []
+    for kw in primary:
+        if any(t in kw for t in ["buy", "deal", "price", "offer", "cheap"]):
+            continue
+        adv.append(" ".join(kw.split()[:3]))
+        if len(adv) >= 2:
+            break
+    if not adv:
+        adv = ["Better build", "Trusted brand"]
+
+    lim = []
+    for kw in secondary:
+        if any(t in kw for t in ["buy", "deal", "price", "offer", "cheap"]):
+            continue
+        lim.append(" ".join(kw.split()[:3]))
+        if len(lim) >= 2:
+            break
+    if not lim:
+        lim = ["Generic alternative", "Lower quality"]
+
+    adv_text = ", ".join(f'"{a}"' for a in adv)
+    lim_text = ", ".join(f'"{l}"' for l in lim)
 
     return (
         f"Professional comparison infographic for {product.title}. "
@@ -151,10 +204,15 @@ def _cross_selling_prompt(project, brand, product, brief) -> str:
     )
 
 
-def _closing_prompt(project, brand, product, brief) -> str:
+def _closing_prompt(project, brand, product, brief, keywords) -> str:
     """Closing: emotional/inspirational final image."""
     headline = brief.emphasis[0] if brief.emphasis and brief.emphasis[0].strip() else None
     direction = brief.style or "Emotional"
+    primary = keywords.get("primary", [])
+    secondary = keywords.get("secondary", [])
+    keyword_line = ""
+    if primary or secondary:
+        keyword_line = f" Conversion line with: {primary[0] if primary else ''} {secondary[0] if secondary else ''}."
 
     base = (
         f"Premium closing brand image for {product.title} by {project.brand_name}. "
@@ -168,6 +226,8 @@ def _closing_prompt(project, brand, product, brief) -> str:
     else:
         base += "No text — purely visual composition. "
     base += "Premium brand campaign quality. Final impression image."
+    if keyword_line:
+        base += keyword_line
     return base
 
 
