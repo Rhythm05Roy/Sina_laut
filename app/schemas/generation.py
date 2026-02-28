@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List
+from typing import Any, List, Optional
 from app.schemas.project import ProjectSetup
 from app.schemas.brand import BrandCI
 from app.schemas.product import ProductInfo
@@ -28,6 +28,46 @@ class ImageGenerationRequest(BaseModel):
 class GenerationResponse(BaseModel):
     job_id: str
     status: str
+    context_id: Optional[str] = Field(
+        default=None,
+        description="Step 4 context ID that can be reused in subsequent generation/refine calls."
+    )
+    jobId: Optional[str] = Field(
+        default=None,
+        description="CamelCase alias for integration compatibility."
+    )
+    contextId: Optional[str] = Field(
+        default=None,
+        description="CamelCase alias for integration compatibility."
+    )
+    imageUrl: Optional[str] = Field(
+        default=None,
+        description="Generated image URL or data URL."
+    )
+    imageBuffer: Optional[str] = Field(
+        default=None,
+        description="Base64 image bytes (Buffer-compatible payload for JS clients)."
+    )
+    imageMimeType: Optional[str] = Field(
+        default=None,
+        description="Generated image MIME type."
+    )
+    imageFileName: Optional[str] = Field(
+        default=None,
+        description="Generated image filename."
+    )
+    prompt: Optional[str] = Field(
+        default=None,
+        description="Prompt used for generation."
+    )
+    refinePrompt: Optional[str] = Field(
+        default=None,
+        description="Prompt/feedback used for refinement."
+    )
+    rawResponse: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Raw structured metadata from generation pipeline."
+    )
     suggested_prompts: dict | None = Field(
         default=None,
         description="Optional prompt suggestions for downstream slots (key_facts, lifestyle, etc.)"

@@ -1,16 +1,58 @@
 """
 Request schemas for Step 4 individual image generation routes.
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Literal
 
-class BaseStep4Request(BaseModel):
-    project_id: str = Field(..., description="Project ID from Step 1")
-    style_template: str = Field("playful", description="Visual style (playful, modern, minimal)")
+class ExternalProjectPayload(BaseModel):
+    """
+    Project payload accepted from external backend integrations.
+    """
+    id: str
+    ownerId: Optional[str] = None
+    name: Optional[str] = None
+    brandName: Optional[str] = None
+    productCategory: Optional[str] = None
+    targetMarketplace: Optional[str] = "OTHER"
+    status: Optional[str] = None
+    mainImage: Optional[str] = None
+    brandLogoAssetId: Optional[str] = None
+    sku: Optional[str] = None
+    shortDescription: Optional[str] = None
+    brandFontHeading: Optional[str] = None
+    brandFontSubheading: Optional[str] = None
+    createdAt: Optional[str] = None
+    updatedAt: Optional[str] = None
+    imagesCreated: Optional[int] = None
+    productsOptimized: Optional[int] = None
 
-class Image1Request(BaseStep4Request):
+    model_config = ConfigDict(extra="allow")
+
+class MainContextRequest(BaseModel):
+    project_id: Optional[str] = Field(
+        None,
+        description="Project ID from Step 1. Optional if context_id or project is provided."
+    )
+    context_id: Optional[str] = Field(
+        None,
+        description="Generation context returned by previous Step 4 call."
+    )
+    project: Optional[ExternalProjectPayload] = Field(
+        None,
+        description="External project payload (accepted by main-product route for integration)."
+    )
+    model_config = ConfigDict(extra="ignore")
+
+class BaseStep4Request(BaseModel):
+    style_template: str = Field("playful", description="Visual style (playful, modern, minimal)")
+    model_config = ConfigDict(extra="ignore")
+
+class Image1Request(MainContextRequest, BaseStep4Request):
     """Main Product Image Request"""
-    image_url: str = Field(..., description="Data URL or public URL of the main product photo")
+    image_url: Optional[str] = Field(
+        None,
+        description="Data URL, public URL, or local file path of the main product photo."
+    )
 
 class Image2Request(BaseStep4Request):
     """Key Facts Image Request"""
@@ -42,7 +84,7 @@ class Image7Request(BaseStep4Request):
     headline: Optional[str] = Field(None, description="Optional custom headline")
 
 # Refinement Requests
-class RefineBaseRequest(BaseStep4Request):
+class RefineBaseRequest(BaseModel):
     feedback: str = Field(..., description="Refinement instructions")
 
 class Image1RefineRequest(Image1Request, RefineBaseRequest):
