@@ -4,6 +4,58 @@ Request schemas for Step 4 individual image generation routes.
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Literal
 
+class KeyFactsConfig(BaseModel):
+    style_template: Optional[str] = None
+    key_facts: Optional[List[str]] = Field(None, min_length=1, max_length=4)
+    background_style: Optional[str] = None
+    logo_position: Optional[str] = None
+
+class LifestyleConfig(BaseModel):
+    style_template: Optional[str] = None
+    scenario: Optional[str] = None
+    ref_image_url: Optional[str] = None
+
+class UspsConfig(BaseModel):
+    style_template: Optional[str] = None
+    usps: Optional[List[str]] = Field(None, min_length=1, max_length=4)
+
+class ComparisonConfig(BaseModel):
+    style_template: Optional[str] = None
+    advantages: Optional[List[str]] = None
+    limitations: Optional[List[str]] = None
+
+class CrossSellingConfig(BaseModel):
+    style_template: Optional[str] = None
+    product_names: Optional[List[str]] = Field(None, min_length=1, max_length=6)
+
+class ClosingConfig(BaseModel):
+    style_template: Optional[str] = None
+    direction: Optional[Literal["Emotional", "Inspirational", "Brand Storytelling"]] = None
+    headline: Optional[str] = None
+
+class MainRefineConfig(BaseModel):
+    style_template: Optional[str] = None
+    feedback: Optional[str] = None
+    image_url: Optional[str] = None
+
+class KeyFactsRefineConfig(KeyFactsConfig):
+    feedback: Optional[str] = None
+
+class LifestyleRefineConfig(LifestyleConfig):
+    feedback: Optional[str] = None
+
+class UspsRefineConfig(UspsConfig):
+    feedback: Optional[str] = None
+
+class ComparisonRefineConfig(ComparisonConfig):
+    feedback: Optional[str] = None
+
+class CrossSellingRefineConfig(CrossSellingConfig):
+    feedback: Optional[str] = None
+
+class ClosingRefineConfig(ClosingConfig):
+    feedback: Optional[str] = None
+
 class ExternalProjectPayload(BaseModel):
     """
     Project payload accepted from external backend integrations.
@@ -14,7 +66,7 @@ class ExternalProjectPayload(BaseModel):
     targetMarketplace: Optional[str] = "OTHER"
     status: Optional[str] = None
     mainImage: Optional[str] = None
-    brandLogo: Optional[str] = None
+    brandLogoAssetId: Optional[str] = None
     sku: Optional[str] = None
     shortDescription: Optional[str] = None
     brandFontHeading: Optional[str] = None
@@ -23,12 +75,25 @@ class ExternalProjectPayload(BaseModel):
     updatedAt: Optional[str] = None
     imagesCreated: Optional[int] = None
     productsOptimized: Optional[int] = None
+    image2: Optional[KeyFactsConfig] = Field(None, description="Optional defaults for key-facts generation")
+    image3: Optional[LifestyleConfig] = Field(None, description="Optional defaults for lifestyle generation")
+    image4: Optional[UspsConfig] = Field(None, description="Optional defaults for USP generation")
+    image5: Optional[ComparisonConfig] = Field(None, description="Optional defaults for comparison generation")
+    image6: Optional[CrossSellingConfig] = Field(None, description="Optional defaults for cross-selling generation")
+    image7: Optional[ClosingConfig] = Field(None, description="Optional defaults for closing generation")
+    refine_image1: Optional[MainRefineConfig] = Field(None, description="Optional defaults for main-product refinement")
+    refine_image2: Optional[KeyFactsRefineConfig] = Field(None, description="Optional defaults for key-facts refinement")
+    refine_image3: Optional[LifestyleRefineConfig] = Field(None, description="Optional defaults for lifestyle refinement")
+    refine_image4: Optional[UspsRefineConfig] = Field(None, description="Optional defaults for USP refinement")
+    refine_image5: Optional[ComparisonRefineConfig] = Field(None, description="Optional defaults for comparison refinement")
+    refine_image6: Optional[CrossSellingRefineConfig] = Field(None, description="Optional defaults for cross-selling refinement")
+    refine_image7: Optional[ClosingRefineConfig] = Field(None, description="Optional defaults for closing refinement")
 
     model_config = ConfigDict(extra="allow")
 
 class BaseStep4Request(BaseModel):
     style_template: str = Field("playful", description="Visual style (playful, modern, minimal)")
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="allow")
 
 class Image1Request(BaseStep4Request):
     """Main Product Image Request"""
@@ -44,37 +109,32 @@ class Image1Request(BaseStep4Request):
 
 class Image2Request(BaseStep4Request):
     """Key Facts Image Request"""
-    key_facts: List[str] = Field(..., min_length=1, max_length=4, description="List of 4 key facts")
-    background_style: str = Field("Minimal", description="Background style for infographic")
-    logo_position: str = Field("Top", description="Brand logo position")
+    pass
 
 class Image3Request(BaseStep4Request):
     """Lifestyle Image Request"""
-    scenario: str = Field(..., description="Description of the lifestyle scenario")
-    ref_image_url: Optional[str] = Field(None, description="Optional reference image URL")
+    pass
 
 class Image4Request(BaseStep4Request):
     """USP Highlight Image Request"""
-    usps: List[str] = Field(..., min_length=1, max_length=4, description="List of 4 USPs")
+    pass
 
 class Image5Request(BaseStep4Request):
     """Comparison Image Request"""
-    advantages: List[str] = Field(..., description="List of advantages (Our Product)")
-    limitations: List[str] = Field(..., description="List of limitations (Other Products)")
+    pass
 
 class Image6Request(BaseStep4Request):
     """Cross-Selling Image Request"""
-    product_names: List[str] = Field(..., min_length=1, max_length=6, description="List of related product names")
+    pass
 
 class Image7Request(BaseStep4Request):
     """Closing Image Request"""
-    direction: Literal["Emotional", "Inspirational", "Brand Storytelling"] = "Emotional"
-    headline: Optional[str] = Field(None, description="Optional custom headline")
+    pass
 
 # Refinement Requests
 class RefineBaseRequest(BaseModel):
     feedback: str = Field(..., description="Refinement instructions")
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="allow")
 
 class Image1RefineRequest(BaseStep4Request, RefineBaseRequest):
     image_url: Optional[str] = Field(
@@ -83,39 +143,19 @@ class Image1RefineRequest(BaseStep4Request, RefineBaseRequest):
     )
 
 class Image2RefineRequest(BaseStep4Request, RefineBaseRequest):
-    key_facts: Optional[List[str]] = Field(
-        None,
-        min_length=1,
-        max_length=4,
-        description="Optional key facts override for this refinement."
-    )
-    background_style: Optional[str] = Field(None, description="Optional background style override")
-    logo_position: Optional[str] = Field(None, description="Optional logo position override")
+    pass
 
 class Image3RefineRequest(BaseStep4Request, RefineBaseRequest):
-    scenario: Optional[str] = Field(None, description="Optional scenario override")
-    ref_image_url: Optional[str] = Field(None, description="Optional reference image URL override")
+    pass
 
 class Image4RefineRequest(BaseStep4Request, RefineBaseRequest):
-    usps: Optional[List[str]] = Field(
-        None,
-        min_length=1,
-        max_length=4,
-        description="Optional USP list override for this refinement."
-    )
+    pass
 
 class Image5RefineRequest(BaseStep4Request, RefineBaseRequest):
-    advantages: Optional[List[str]] = Field(None, description="Optional advantages override")
-    limitations: Optional[List[str]] = Field(None, description="Optional limitations override")
+    pass
 
 class Image6RefineRequest(BaseStep4Request, RefineBaseRequest):
-    product_names: Optional[List[str]] = Field(
-        None,
-        min_length=1,
-        max_length=6,
-        description="Optional related product names override."
-    )
+    pass
 
 class Image7RefineRequest(BaseStep4Request, RefineBaseRequest):
-    direction: Optional[Literal["Emotional", "Inspirational", "Brand Storytelling"]] = None
-    headline: Optional[str] = Field(None, description="Optional custom headline override")
+    pass

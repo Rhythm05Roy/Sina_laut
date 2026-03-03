@@ -23,12 +23,12 @@ from app.core.store import (
     save_generated_image_url, get_generated_image_url,
     save_asset_url, get_asset_url,
     save_generation_context, get_project_id_by_context, get_latest_context_id,
-    bind_job_to_context, get_context_id_by_job
+    bind_job_to_context, get_context_id_by_job,
+    save_project_slot_defaults, get_project_slot_defaults
 )
 from app.services.slots import build_followup_suggestions
 from app.schemas.step4 import (
-    Image1Request, Image2Request, Image3Request, Image4Request,
-    Image5Request, Image6Request, Image7Request,
+    Image1Request,
     Image1RefineRequest, Image2RefineRequest, Image3RefineRequest, 
     Image4RefineRequest, Image5RefineRequest, Image6RefineRequest,
     Image7RefineRequest, ExternalProjectPayload
@@ -133,6 +133,20 @@ def _resolve_project_and_context(payload) -> tuple[str, str]:
     return project_id, context_id
 
 
+def _resolve_latest_project_and_context() -> tuple[str, str]:
+    latest_context = get_latest_context_id()
+    if not latest_context:
+        raise HTTPException(
+            status_code=400,
+            detail="No active generation context found. Call /generate/main-product first."
+        )
+    project_id = get_project_id_by_context(latest_context)
+    if not project_id or project_id not in projects:
+        raise HTTPException(status_code=404, detail="Project context not found.")
+    save_generation_context(latest_context, project_id)
+    return project_id, latest_context
+
+
 def build_base_request(project_id: str) -> tuple[ProjectSetup, BrandCI, ProductInfo]:
     proj_data = projects.get(project_id)
     if not proj_data:
@@ -187,6 +201,48 @@ def normalize_image_url(maybe_path: str) -> str:
         b64 = base64.b64encode(path.read_bytes()).decode("ascii")
         return f"data:{mime};base64,{b64}"
     return maybe_path
+
+
+def _save_defaults_from_project_payload(project_id: str, project_payload: ExternalProjectPayload):
+    gen_map = {
+        "key_facts": getattr(project_payload, "image2", None),
+        "lifestyle": getattr(project_payload, "image3", None),
+        "usps": getattr(project_payload, "image4", None),
+        "comparison": getattr(project_payload, "image5", None),
+        "cross_selling": getattr(project_payload, "image6", None),
+        "closing": getattr(project_payload, "image7", None),
+    }
+    ref_map = {
+        "main_product": getattr(project_payload, "refine_image1", None),
+        "key_facts": getattr(project_payload, "refine_image2", None),
+        "lifestyle": getattr(project_payload, "refine_image3", None),
+        "usps": getattr(project_payload, "refine_image4", None),
+        "comparison": getattr(project_payload, "refine_image5", None),
+        "cross_selling": getattr(project_payload, "refine_image6", None),
+        "closing": getattr(project_payload, "refine_image7", None),
+    }
+    for slot_name, cfg in gen_map.items():
+        if cfg:
+            save_project_slot_defaults(project_id, "generate", slot_name, cfg.model_dump(exclude_none=True))
+    for slot_name, cfg in ref_map.items():
+        if cfg:
+            save_project_slot_defaults(project_id, "refine", slot_name, cfg.model_dump(exclude_none=True))
+
+
+def _strip_none(payload_dict: dict) -> dict:
+    return {
+        k: v for k, v in payload_dict.items()
+        if v is not None and (not isinstance(v, list) or len(v) > 0)
+    }
+
+
+def _merge_slot_inputs(project_id: str, stage: str, slot_name: str, payload_dict: dict) -> dict:
+    merged = {}
+    if stage == "refine":
+        merged.update(get_project_slot_defaults(project_id, "generate", slot_name))
+    merged.update(get_project_slot_defaults(project_id, stage, slot_name))
+    merged.update(_strip_none(payload_dict))
+    return merged
 
 
 def _extract_image_parts(image_url: Optional[str]) -> tuple[Optional[str], Optional[str]]:
@@ -422,6 +478,8 @@ async def generate_image1(
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
     project_id, context_id = _resolve_project_and_context(payload)
+    if payload.project:
+        _save_defaults_from_project_payload(project_id, payload.project)
     image_source = payload.image_url or (payload.project.mainImage if payload.project else None) or get_asset_url(project_id, "main_raw")
     if not image_source:
         raise HTTPException(
@@ -453,130 +511,154 @@ async def generate_image1(
 # 2. Key Facts
 @router.post("/generate/key-facts", response_model=GenerationResponse, summary="2. Generate Key Facts")
 async def generate_image2(
-    payload: Image2Request,
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
-    project_id, context_id = _resolve_project_and_context(payload)
+    project_id, context_id = _resolve_latest_project_and_context()
+    merged = _merge_slot_inputs(project_id, "generate", "key_facts", {})
     assets = []
     img1 = get_generated_image_url(project_id, "main_product") or get_asset_url(project_id, "main_raw")
     if img1:
         assets.append(Asset(type="product_photo", url=img1))
 
-    facts_text = "; ".join(payload.key_facts)
+    facts = [f for f in (merged.get("key_facts") or []) if f and str(f).strip()]
+    if not facts:
+        _, _, product = build_base_request(project_id)
+        facts = product.usps[:4] if product.usps else []
+    facts_text = "; ".join(facts) if facts else "Use analyzed product facts from context."
+    bg_style = merged.get("background_style", "Minimal")
+    logo_pos = merged.get("logo_position", "Top")
+    style_template = merged.get("style_template", "playful")
     return await _run_generation(
         generator, project_id, context_id, "key_facts",
-        instructions=f"Create a product infographic. Background: {payload.background_style}. Logo: {payload.logo_position}. Facts: {facts_text}.",
-        emphasis=payload.key_facts,
+        instructions=f"Create a product infographic. Background: {bg_style}. Logo: {logo_pos}. Facts: {facts_text}.",
+        emphasis=facts,
         assets=assets,
-        style_template=payload.style_template,
+        style_template=style_template,
         remove_background=False
     )
 
 # 3. Lifestyle
 @router.post("/generate/lifestyle", response_model=GenerationResponse, summary="3. Generate Lifestyle")
 async def generate_image3(
-    payload: Image3Request,
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
-    project_id, context_id = _resolve_project_and_context(payload)
+    project_id, context_id = _resolve_latest_project_and_context()
+    merged = _merge_slot_inputs(project_id, "generate", "lifestyle", {})
     assets = []
     img1 = get_generated_image_url(project_id, "main_product")
     if img1:
         assets.append(Asset(type="product_photo", url=img1))
-    if payload.ref_image_url:
-        assets.append(Asset(type="product_photo", url=normalize_image_url(payload.ref_image_url)))
+    ref_image_url = merged.get("ref_image_url")
+    if ref_image_url:
+        assets.append(Asset(type="product_photo", url=normalize_image_url(ref_image_url)))
 
+    scenario = merged.get("scenario", "Use previous lifestyle context for a marketplace-ready scene.")
+    style_template = merged.get("style_template", "playful")
     return await _run_generation(
         generator, project_id, context_id, "lifestyle",
-        instructions=f"Lifestyle scene: {payload.scenario}",
+        instructions=f"Lifestyle scene: {scenario}",
         assets=assets,
-        style_template=payload.style_template,
+        style_template=style_template,
         remove_background=False
     )
 
 # 4. USP Highlight
 @router.post("/generate/usps", response_model=GenerationResponse, summary="4. Generate USP Highlight")
 async def generate_image4(
-    payload: Image4Request,
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
-    project_id, context_id = _resolve_project_and_context(payload)
+    project_id, context_id = _resolve_latest_project_and_context()
+    merged = _merge_slot_inputs(project_id, "generate", "usps", {})
     assets = []
     img1 = get_generated_image_url(project_id, "main_product")
     if img1:
         assets.append(Asset(type="product_photo", url=img1))
 
+    usps = [u for u in (merged.get("usps") or []) if u and str(u).strip()]
+    if not usps:
+        _, _, product = build_base_request(project_id)
+        usps = product.usps[:4] if product.usps else []
+    usp_text = "; ".join(usps) if usps else "Use previous USP context."
+    style_template = merged.get("style_template", "playful")
     return await _run_generation(
         generator, project_id, context_id, "usps",
-        instructions=f"USP Highlights: {'; '.join(payload.usps)}",
-        emphasis=payload.usps,
+        instructions=f"USP Highlights: {usp_text}",
+        emphasis=usps,
         assets=assets,
-        style_template=payload.style_template,
+        style_template=style_template,
         remove_background=False
     )
 
 # 5. Comparison
 @router.post("/generate/comparison", response_model=GenerationResponse, summary="5. Generate Comparison")
 async def generate_image5(
-    payload: Image5Request,
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
-    project_id, context_id = _resolve_project_and_context(payload)
+    project_id, context_id = _resolve_latest_project_and_context()
+    merged = _merge_slot_inputs(project_id, "generate", "comparison", {})
     assets = []
     img1 = get_generated_image_url(project_id, "main_product")
     if img1:
         assets.append(Asset(type="product_photo", url=img1))
 
-    all_items = [f"ADV:{a}" for a in payload.advantages] + [f"LIM:{l}" for l in payload.limitations]
+    advantages = [a for a in (merged.get("advantages") or []) if a and str(a).strip()]
+    limitations = [l for l in (merged.get("limitations") or []) if l and str(l).strip()]
+    all_items = [f"ADV:{a}" for a in advantages] + [f"LIM:{l}" for l in limitations]
+    style_template = merged.get("style_template", "playful")
     return await _run_generation(
         generator, project_id, context_id, "comparison",
         instructions="Comparison infographic. Left: Advantages (Green). Right: Limitations (Red).",
         emphasis=all_items,
         assets=assets,
-        style_template=payload.style_template,
+        style_template=style_template,
         remove_background=False
     )
 
 # 6. Cross-Selling
 @router.post("/generate/cross-selling", response_model=GenerationResponse, summary="6. Generate Cross-Selling")
 async def generate_image6(
-    payload: Image6Request,
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
-    project_id, context_id = _resolve_project_and_context(payload)
+    project_id, context_id = _resolve_latest_project_and_context()
+    merged = _merge_slot_inputs(project_id, "generate", "cross_selling", {})
     assets = []
     img1 = get_generated_image_url(project_id, "main_product")
     if img1:
         assets.append(Asset(type="product_photo", url=img1))
 
+    product_names = [n for n in (merged.get("product_names") or []) if n and str(n).strip()]
+    style_template = merged.get("style_template", "playful")
     return await _run_generation(
         generator, project_id, context_id, "cross_selling",
-        instructions=f"Cross-selling grid: {', '.join(payload.product_names)}",
-        emphasis=payload.product_names,
+        instructions=f"Cross-selling grid: {', '.join(product_names)}" if product_names else "Refine cross-selling layout with previous context.",
+        emphasis=product_names,
         assets=assets,
-        style_template=payload.style_template,
+        style_template=style_template,
         remove_background=False
     )
 
 # 7. Closing
 @router.post("/generate/closing", response_model=GenerationResponse, summary="7. Generate Closing")
 async def generate_image7(
-    payload: Image7Request,
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
-    project_id, context_id = _resolve_project_and_context(payload)
+    project_id, context_id = _resolve_latest_project_and_context()
+    merged = _merge_slot_inputs(project_id, "generate", "closing", {})
     assets = []
     img1 = get_generated_image_url(project_id, "main_product")
     if img1:
         assets.append(Asset(type="product_photo", url=img1))
 
-    emphasis = [payload.headline] if payload.headline else []
+    direction = merged.get("direction", "Emotional")
+    headline = merged.get("headline")
+    emphasis = [headline] if headline else []
+    style_template = merged.get("style_template", "playful")
     return await _run_generation(
         generator, project_id, context_id, "closing",
-        instructions=f"Closing image. Direction: {payload.direction}. Headline: {payload.headline or 'None'}",
+        instructions=f"Closing image. Direction: {direction}. Headline: {headline or 'None'}",
         emphasis=emphasis,
         assets=assets,
-        style_template=payload.style_template,
+        style_template=style_template,
         remove_background=False
     )
 
@@ -589,7 +671,8 @@ async def refine_image1(
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
     project_id, context_id = _resolve_project_and_context(payload)
-    image_source = payload.image_url or get_generated_image_url(project_id, "main_product") or get_asset_url(project_id, "main_raw")
+    merged = _merge_slot_inputs(project_id, "refine", "main_product", payload.model_dump(exclude_none=True))
+    image_source = merged.get("image_url") or get_generated_image_url(project_id, "main_product") or get_asset_url(project_id, "main_raw")
     if not image_source:
         raise HTTPException(status_code=400, detail="No source image available for main-product refinement.")
     normalized = normalize_image_url(image_source)
@@ -597,9 +680,9 @@ async def refine_image1(
     return await _run_refinement(
         generator, project_id, context_id, getattr(payload, "job_id", None), "main_product",
         instructions="Create a marketplace-ready product image. Pure white background. Product centered. No text.",
-        feedback=payload.feedback,
+        feedback=merged.get("feedback", payload.feedback),
         assets=assets,
-        style_template=payload.style_template,
+        style_template=merged.get("style_template", payload.style_template),
         remove_background=True
     )
 
@@ -609,23 +692,24 @@ async def refine_image2(
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
     project_id, context_id = _resolve_project_and_context(payload)
+    merged = _merge_slot_inputs(project_id, "refine", "key_facts", payload.model_dump(exclude_none=True))
     # Context logic same as generation (plus the generated image fetched by _run_refinement)
     assets = []
     img1 = get_generated_image_url(project_id, "main_product")
     if img1:
         assets.append(Asset(type="product_photo", url=img1))
 
-    facts = [f for f in (payload.key_facts or []) if f and f.strip()]
+    facts = [f for f in (merged.get("key_facts") or []) if f and str(f).strip()]
     facts_text = "; ".join(facts) if facts else "Use previous key fact text context"
-    bg_style = payload.background_style or "Keep previous style"
-    logo_pos = payload.logo_position or "Keep previous logo placement"
+    bg_style = merged.get("background_style", "Keep previous style")
+    logo_pos = merged.get("logo_position", "Keep previous logo placement")
     return await _run_refinement(
         generator, project_id, context_id, getattr(payload, "job_id", None), "key_facts",
         instructions=f"Refine product infographic. Background: {bg_style}. Logo: {logo_pos}. Facts: {facts_text}.",
-        feedback=payload.feedback,
+        feedback=merged.get("feedback", payload.feedback),
         emphasis=facts,
         assets=assets,
-        style_template=payload.style_template
+        style_template=merged.get("style_template", payload.style_template)
     )
 
 @router.post("/refine/lifestyle", response_model=GenerationResponse, summary="Refine Lifestyle")
@@ -634,20 +718,21 @@ async def refine_image3(
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
     project_id, context_id = _resolve_project_and_context(payload)
+    merged = _merge_slot_inputs(project_id, "refine", "lifestyle", payload.model_dump(exclude_none=True))
     assets = []
     img1 = get_generated_image_url(project_id, "main_product")
     if img1:
         assets.append(Asset(type="product_photo", url=img1))
-    if payload.ref_image_url:
-        assets.append(Asset(type="product_photo", url=normalize_image_url(payload.ref_image_url)))
+    if merged.get("ref_image_url"):
+        assets.append(Asset(type="product_photo", url=normalize_image_url(merged.get("ref_image_url"))))
 
-    scenario_text = payload.scenario or "Keep previous lifestyle scenario context"
+    scenario_text = merged.get("scenario", "Keep previous lifestyle scenario context")
     return await _run_refinement(
         generator, project_id, context_id, getattr(payload, "job_id", None), "lifestyle",
         instructions=f"Lifestyle scene: {scenario_text}",
-        feedback=payload.feedback,
+        feedback=merged.get("feedback", payload.feedback),
         assets=assets,
-        style_template=payload.style_template
+        style_template=merged.get("style_template", payload.style_template)
     )
 
 @router.post("/refine/usps", response_model=GenerationResponse, summary="Refine USP Highlight")
@@ -656,20 +741,21 @@ async def refine_image4(
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
     project_id, context_id = _resolve_project_and_context(payload)
+    merged = _merge_slot_inputs(project_id, "refine", "usps", payload.model_dump(exclude_none=True))
     assets = []
     img1 = get_generated_image_url(project_id, "main_product")
     if img1:
         assets.append(Asset(type="product_photo", url=img1))
 
-    usps = [u for u in (payload.usps or []) if u and u.strip()]
+    usps = [u for u in (merged.get("usps") or []) if u and str(u).strip()]
     usp_text = "; ".join(usps) if usps else "Keep previous USP text context"
     return await _run_refinement(
         generator, project_id, context_id, getattr(payload, "job_id", None), "usps",
         instructions=f"USP Highlights: {usp_text}",
-        feedback=payload.feedback,
+        feedback=merged.get("feedback", payload.feedback),
         emphasis=usps,
         assets=assets,
-        style_template=payload.style_template
+        style_template=merged.get("style_template", payload.style_template)
     )
 
 @router.post("/refine/comparison", response_model=GenerationResponse, summary="Refine Comparison")
@@ -678,13 +764,14 @@ async def refine_image5(
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
     project_id, context_id = _resolve_project_and_context(payload)
+    merged = _merge_slot_inputs(project_id, "refine", "comparison", payload.model_dump(exclude_none=True))
     assets = []
     img1 = get_generated_image_url(project_id, "main_product")
     if img1:
         assets.append(Asset(type="product_photo", url=img1))
     
-    advantages = [a for a in (payload.advantages or []) if a and a.strip()]
-    limitations = [l for l in (payload.limitations or []) if l and l.strip()]
+    advantages = [a for a in (merged.get("advantages") or []) if a and str(a).strip()]
+    limitations = [l for l in (merged.get("limitations") or []) if l and str(l).strip()]
     all_items = [f"ADV:{a}" for a in advantages] + [f"LIM:{l}" for l in limitations]
     comp_instruction = "Comparison infographic. Left: Advantages (Green). Right: Limitations (Red)."
     if not all_items:
@@ -692,10 +779,10 @@ async def refine_image5(
     return await _run_refinement(
         generator, project_id, context_id, getattr(payload, "job_id", None), "comparison",
         instructions=comp_instruction,
-        feedback=payload.feedback,
+        feedback=merged.get("feedback", payload.feedback),
         emphasis=all_items,
         assets=assets,
-        style_template=payload.style_template
+        style_template=merged.get("style_template", payload.style_template)
     )
 
 @router.post("/refine/cross-selling", response_model=GenerationResponse, summary="Refine Cross-Selling")
@@ -704,20 +791,21 @@ async def refine_image6(
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
     project_id, context_id = _resolve_project_and_context(payload)
+    merged = _merge_slot_inputs(project_id, "refine", "cross_selling", payload.model_dump(exclude_none=True))
     assets = []
     img1 = get_generated_image_url(project_id, "main_product")
     if img1:
         assets.append(Asset(type="product_photo", url=img1))
 
-    product_names = [n for n in (payload.product_names or []) if n and n.strip()]
+    product_names = [n for n in (merged.get("product_names") or []) if n and str(n).strip()]
     cs_instruction = f"Cross-selling grid: {', '.join(product_names)}" if product_names else "Refine existing cross-selling layout using previous context."
     return await _run_refinement(
         generator, project_id, context_id, getattr(payload, "job_id", None), "cross_selling",
         instructions=cs_instruction,
-        feedback=payload.feedback,
+        feedback=merged.get("feedback", payload.feedback),
         emphasis=product_names,
         assets=assets,
-        style_template=payload.style_template
+        style_template=merged.get("style_template", payload.style_template)
     )
 
 @router.post("/refine/closing", response_model=GenerationResponse, summary="Refine Closing")
@@ -726,21 +814,23 @@ async def refine_image7(
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
     project_id, context_id = _resolve_project_and_context(payload)
+    merged = _merge_slot_inputs(project_id, "refine", "closing", payload.model_dump(exclude_none=True))
     assets = []
     img1 = get_generated_image_url(project_id, "main_product")
     if img1:
         assets.append(Asset(type="product_photo", url=img1))
 
-    emphasis = [payload.headline] if payload.headline else []
-    direction = payload.direction or "Keep previous direction"
-    headline = payload.headline or "Use previous headline context"
+    headline = merged.get("headline")
+    emphasis = [headline] if headline else []
+    direction = merged.get("direction", "Keep previous direction")
+    headline_text = headline or "Use previous headline context"
     return await _run_refinement(
         generator, project_id, context_id, getattr(payload, "job_id", None), "closing",
-        instructions=f"Closing image. Direction: {direction}. Headline: {headline}",
-        feedback=payload.feedback,
+        instructions=f"Closing image. Direction: {direction}. Headline: {headline_text}",
+        feedback=merged.get("feedback", payload.feedback),
         emphasis=emphasis,
         assets=assets,
-        style_template=payload.style_template
+        style_template=merged.get("style_template", payload.style_template)
     )
 
 

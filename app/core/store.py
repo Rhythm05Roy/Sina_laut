@@ -18,6 +18,16 @@ generated_images: Dict[str, Dict[str, str]] = {}
 # Structure: { project_id: { "main_raw": "http...", "lifestyle_ref": "http..." } }
 assets: Dict[str, Dict[str, str]] = {}
 
+# Optional per-project defaults supplied in main-product route.
+# Structure:
+# {
+#   project_id: {
+#     "generate": {slot_name: {...}},
+#     "refine": {slot_name: {...}}
+#   }
+# }
+project_slot_defaults: Dict[str, Dict[str, Dict[str, Dict[str, Any]]]] = {}
+
 # Step 4 generation context memory.
 # context_id -> project_id
 generation_contexts: Dict[str, str] = {}
@@ -79,3 +89,13 @@ def bind_job_to_context(job_id: str, context_id: str):
 
 def get_context_id_by_job(job_id: str) -> str | None:
     return job_contexts.get(job_id)
+
+def save_project_slot_defaults(project_id: str, stage: str, slot_name: str, values: Dict[str, Any]):
+    if project_id not in project_slot_defaults:
+        project_slot_defaults[project_id] = {"generate": {}, "refine": {}}
+    if stage not in project_slot_defaults[project_id]:
+        project_slot_defaults[project_id][stage] = {}
+    project_slot_defaults[project_id][stage][slot_name] = values
+
+def get_project_slot_defaults(project_id: str, stage: str, slot_name: str) -> Dict[str, Any]:
+    return project_slot_defaults.get(project_id, {}).get(stage, {}).get(slot_name, {})
