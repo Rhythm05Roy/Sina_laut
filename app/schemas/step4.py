@@ -8,15 +8,13 @@ class ExternalProjectPayload(BaseModel):
     """
     Project payload accepted from external backend integrations.
     """
-    id: str
-    ownerId: Optional[str] = None
     name: Optional[str] = None
     brandName: Optional[str] = None
     productCategory: Optional[str] = None
     targetMarketplace: Optional[str] = "OTHER"
     status: Optional[str] = None
     mainImage: Optional[str] = None
-    brandLogoAssetId: Optional[str] = None
+    brandLogo: Optional[str] = None
     sku: Optional[str] = None
     shortDescription: Optional[str] = None
     brandFontHeading: Optional[str] = None
@@ -28,31 +26,21 @@ class ExternalProjectPayload(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-class MainContextRequest(BaseModel):
-    project_id: Optional[str] = Field(
-        None,
-        description="Project ID from Step 1. Optional if context_id or project is provided."
-    )
-    context_id: Optional[str] = Field(
-        None,
-        description="Generation context returned by previous Step 4 call."
-    )
-    project: Optional[ExternalProjectPayload] = Field(
-        None,
-        description="External project payload (accepted by main-product route for integration)."
-    )
-    model_config = ConfigDict(extra="ignore")
-
 class BaseStep4Request(BaseModel):
     style_template: str = Field("playful", description="Visual style (playful, modern, minimal)")
     model_config = ConfigDict(extra="ignore")
 
-class Image1Request(MainContextRequest, BaseStep4Request):
+class Image1Request(BaseStep4Request):
     """Main Product Image Request"""
+    project: Optional[ExternalProjectPayload] = Field(
+        None,
+        description="External project payload from integration backend."
+    )
     image_url: Optional[str] = Field(
         None,
         description="Data URL, public URL, or local file path of the main product photo."
     )
+    model_config = ConfigDict(extra="allow")
 
 class Image2Request(BaseStep4Request):
     """Key Facts Image Request"""
@@ -86,24 +74,48 @@ class Image7Request(BaseStep4Request):
 # Refinement Requests
 class RefineBaseRequest(BaseModel):
     feedback: str = Field(..., description="Refinement instructions")
+    model_config = ConfigDict(extra="ignore")
 
-class Image1RefineRequest(Image1Request, RefineBaseRequest):
-    pass
+class Image1RefineRequest(BaseStep4Request, RefineBaseRequest):
+    image_url: Optional[str] = Field(
+        None,
+        description="Optional new product image source for refinement. If omitted, previous generated context is used."
+    )
 
-class Image2RefineRequest(Image2Request, RefineBaseRequest):
-    pass
+class Image2RefineRequest(BaseStep4Request, RefineBaseRequest):
+    key_facts: Optional[List[str]] = Field(
+        None,
+        min_length=1,
+        max_length=4,
+        description="Optional key facts override for this refinement."
+    )
+    background_style: Optional[str] = Field(None, description="Optional background style override")
+    logo_position: Optional[str] = Field(None, description="Optional logo position override")
 
-class Image3RefineRequest(Image3Request, RefineBaseRequest):
-    pass
+class Image3RefineRequest(BaseStep4Request, RefineBaseRequest):
+    scenario: Optional[str] = Field(None, description="Optional scenario override")
+    ref_image_url: Optional[str] = Field(None, description="Optional reference image URL override")
 
-class Image4RefineRequest(Image4Request, RefineBaseRequest):
-    pass
+class Image4RefineRequest(BaseStep4Request, RefineBaseRequest):
+    usps: Optional[List[str]] = Field(
+        None,
+        min_length=1,
+        max_length=4,
+        description="Optional USP list override for this refinement."
+    )
 
-class Image5RefineRequest(Image5Request, RefineBaseRequest):
-    pass
+class Image5RefineRequest(BaseStep4Request, RefineBaseRequest):
+    advantages: Optional[List[str]] = Field(None, description="Optional advantages override")
+    limitations: Optional[List[str]] = Field(None, description="Optional limitations override")
 
-class Image6RefineRequest(Image6Request, RefineBaseRequest):
-    pass
+class Image6RefineRequest(BaseStep4Request, RefineBaseRequest):
+    product_names: Optional[List[str]] = Field(
+        None,
+        min_length=1,
+        max_length=6,
+        description="Optional related product names override."
+    )
 
-class Image7RefineRequest(Image7Request, RefineBaseRequest):
-    pass
+class Image7RefineRequest(BaseStep4Request, RefineBaseRequest):
+    direction: Optional[Literal["Emotional", "Inspirational", "Brand Storytelling"]] = None
+    headline: Optional[str] = Field(None, description="Optional custom headline override")

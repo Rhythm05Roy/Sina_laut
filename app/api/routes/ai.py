@@ -23,7 +23,7 @@ from app.core.store import (
     save_generated_image_url, get_generated_image_url,
     save_asset_url, get_asset_url,
     save_generation_context, get_project_id_by_context, get_latest_context_id,
-    bind_job_to_context
+    bind_job_to_context, get_context_id_by_job
 )
 from app.services.slots import build_followup_suggestions
 from app.schemas.step4 import (
@@ -48,7 +48,9 @@ def _normalize_marketplace(value: Optional[str]) -> str:
 
 
 def _upsert_project_from_external(project: ExternalProjectPayload) -> str:
-    project_id = project.id
+    extra = getattr(project, "__pydantic_extra__", {}) or {}
+    raw_id = extra.get("id")
+    project_id = str(raw_id).strip() if raw_id else f"ext-{uuid4()}"
     marketplace = _normalize_marketplace(project.targetMarketplace)
     existing = projects.get(project_id, {})
     projects[project_id] = {
@@ -92,12 +94,24 @@ def _upsert_project_from_external(project: ExternalProjectPayload) -> str:
 
 
 def _resolve_project_and_context(payload) -> tuple[str, str]:
+    extra = getattr(payload, "__pydantic_extra__", {}) or {}
     project_id: Optional[str] = None
-    payload_context_id: Optional[str] = getattr(payload, "context_id", None)
+    payload_job_id: Optional[str] = getattr(payload, "job_id", None) or extra.get("job_id")
+    payload_context_id: Optional[str] = getattr(payload, "context_id", None) or extra.get("context_id")
+    if payload_job_id:
+        payload_context_id = get_context_id_by_job(payload_job_id)
+        if not payload_context_id:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Context for job_id '{payload_job_id}' not found. Generate first, then refine."
+            )
+        project_id = get_project_id_by_context(payload_context_id)
     if getattr(payload, "project", None):
         project_id = _upsert_project_from_external(payload.project)
     elif getattr(payload, "project_id", None):
         project_id = payload.project_id
+    elif extra.get("project_id"):
+        project_id = extra.get("project_id")
     elif payload_context_id:
         project_id = get_project_id_by_context(payload_context_id)
     else:
@@ -109,7 +123,7 @@ def _resolve_project_and_context(payload) -> tuple[str, str]:
     if not project_id:
         raise HTTPException(
             status_code=400,
-            detail="Missing project context. Send project_id, context_id, or project payload."
+            detail="Missing project context. Send project payload to main-product first."
         )
     if project_id not in projects:
         raise HTTPException(status_code=404, detail="Project context not found.")
@@ -190,7 +204,6 @@ def _to_generation_response(
     *,
     job_id: str,
     status: str,
-    context_id: str,
     slot_name: str,
     analysis_meta: dict,
     generator: ImageGenerationService,
@@ -200,25 +213,22 @@ def _to_generation_response(
     first_image = job.images[0] if job and job.images else None
     image_url = first_image.image_url if first_image else None
     mime, b64 = _extract_image_parts(image_url)
-    file_name = None
-    prompt = None
+    file_name = f"{job_id}_{slot_name}.png"
+    prompt = ""
     if first_image:
         file_name = Path(first_image.file_path).name if first_image.file_path else f"{job_id}_{slot_name}.png"
-        prompt = first_image.prompt
+        prompt = first_image.prompt or ""
 
     return GenerationResponse(
         job_id=job_id,
         status=status,
-        context_id=context_id,
-        jobId=job_id,
-        contextId=context_id,
         imageUrl=image_url,
         imageBuffer=b64,
         imageMimeType=mime,
         imageFileName=file_name,
         prompt=prompt,
         refinePrompt=refine_prompt,
-        rawResponse=analysis_meta.get("pipeline"),
+        rawResponse=analysis_meta.get("pipeline") or {},
         analysis_used=analysis_meta.get("analysis_used"),
         analysis_ok=analysis_meta.get("analysis_ok"),
         analysis_text=analysis_meta.get("analysis_text"),
@@ -280,7 +290,6 @@ async def _run_generation(
     return _to_generation_response(
         job_id=job_id,
         status=job_status,
-        context_id=context_id,
         slot_name=slot_name,
         analysis_meta=analysis_meta,
         generator=generator,
@@ -291,6 +300,7 @@ async def _run_refinement(
     generator: ImageGenerationService,
     project_id: str,
     context_id: str,
+    source_job_id: Optional[str],
     slot_name: str,
     instructions: str,
     feedback: str,
@@ -310,11 +320,19 @@ async def _run_refinement(
     except ValueError:
         style_enum = StyleTemplate.PLAYFUL
 
-    # Context: Previously generated image for this slot
-    prev_img = get_generated_image_url(project_id, slot_name)
+    # Context: Prefer exact source job output for this slot, then fallback to latest slot image.
+    prev_img = None
+    if source_job_id:
+        source_job = generator.get_status(source_job_id)
+        if source_job and source_job.images:
+            matched = next((img for img in source_job.images if img.slot_name == slot_name), None)
+            if matched and matched.image_url:
+                prev_img = matched.image_url
+    if not prev_img:
+        prev_img = get_generated_image_url(project_id, slot_name)
     if prev_img:
-        # Add as asset to be refined
-        assets.append(Asset(type="product_photo", url=prev_img))
+        # Keep slot-specific image first so refine uses exact per-route context by default.
+        assets.insert(0, Asset(type="product_photo", url=prev_img))
 
     brief = ImageBrief(
         slot_name=slot_name,
@@ -347,7 +365,6 @@ async def _run_refinement(
     return _to_generation_response(
         job_id=job_id,
         status=job_status,
-        context_id=context_id,
         slot_name=slot_name,
         analysis_meta=analysis_meta,
         generator=generator,
@@ -364,18 +381,39 @@ async def generate_image1(
         ...,
         examples={
             "default": {
-                "summary": "Main product image (white background)",
+                "summary": "Main product image using integration project payload",
                 "value": {
-                    "project_id": "PROJECT_ID_FROM_STEP1",
-                    "style_template": "minimal",
+                    "style_template": "playful",
+                    "project": {
+                        "name": "string",
+                        "brandName": "string",
+                        "productCategory": "string",
+                        "targetMarketplace": "OTHER",
+                        "status": "ACTIVE",
+                        "mainImage": "https://example.com/main-image.png",
+                        "brandLogoAssetId": None,
+                        "sku": "string",
+                        "shortDescription": "string",
+                        "brandFontHeading": "string",
+                        "brandFontSubheading": "string",
+                        "createdAt": "2026-02-26T08:13:59.828Z",
+                        "updatedAt": "2026-02-26T08:13:59.828Z",
+                        "imagesCreated": 0,
+                        "productsOptimized": 0
+                    },
                     "image_url": "data:image/png;base64,REPLACE_WITH_REAL_BASE64_IMAGE"
                 }
             },
             "local_file": {
                 "summary": "Local file path (auto-converted to data URL)",
                 "value": {
-                    "project_id": "PROJECT_ID_FROM_STEP1",
                     "style_template": "minimal",
+                    "project": {
+                        "name": "string",
+                        "brandName": "string",
+                        "productCategory": "string",
+                        "targetMarketplace": "OTHER"
+                    },
                     "image_url": "C:\\\\Users\\\\YourName\\\\Pictures\\\\product.png"
                 }
             }
@@ -557,7 +595,7 @@ async def refine_image1(
     normalized = normalize_image_url(image_source)
     assets = [Asset(type="product_photo", url=normalized)]
     return await _run_refinement(
-        generator, project_id, context_id, "main_product",
+        generator, project_id, context_id, getattr(payload, "job_id", None), "main_product",
         instructions="Create a marketplace-ready product image. Pure white background. Product centered. No text.",
         feedback=payload.feedback,
         assets=assets,
@@ -577,12 +615,15 @@ async def refine_image2(
     if img1:
         assets.append(Asset(type="product_photo", url=img1))
 
-    facts_text = "; ".join(payload.key_facts)
+    facts = [f for f in (payload.key_facts or []) if f and f.strip()]
+    facts_text = "; ".join(facts) if facts else "Use previous key fact text context"
+    bg_style = payload.background_style or "Keep previous style"
+    logo_pos = payload.logo_position or "Keep previous logo placement"
     return await _run_refinement(
-        generator, project_id, context_id, "key_facts",
-        instructions=f"Create a product infographic. Background: {payload.background_style}. Logo: {payload.logo_position}. Facts: {facts_text}.",
+        generator, project_id, context_id, getattr(payload, "job_id", None), "key_facts",
+        instructions=f"Refine product infographic. Background: {bg_style}. Logo: {logo_pos}. Facts: {facts_text}.",
         feedback=payload.feedback,
-        emphasis=payload.key_facts,
+        emphasis=facts,
         assets=assets,
         style_template=payload.style_template
     )
@@ -600,9 +641,10 @@ async def refine_image3(
     if payload.ref_image_url:
         assets.append(Asset(type="product_photo", url=normalize_image_url(payload.ref_image_url)))
 
+    scenario_text = payload.scenario or "Keep previous lifestyle scenario context"
     return await _run_refinement(
-        generator, project_id, context_id, "lifestyle",
-        instructions=f"Lifestyle scene: {payload.scenario}",
+        generator, project_id, context_id, getattr(payload, "job_id", None), "lifestyle",
+        instructions=f"Lifestyle scene: {scenario_text}",
         feedback=payload.feedback,
         assets=assets,
         style_template=payload.style_template
@@ -619,11 +661,13 @@ async def refine_image4(
     if img1:
         assets.append(Asset(type="product_photo", url=img1))
 
+    usps = [u for u in (payload.usps or []) if u and u.strip()]
+    usp_text = "; ".join(usps) if usps else "Keep previous USP text context"
     return await _run_refinement(
-        generator, project_id, context_id, "usps",
-        instructions=f"USP Highlights: {'; '.join(payload.usps)}",
+        generator, project_id, context_id, getattr(payload, "job_id", None), "usps",
+        instructions=f"USP Highlights: {usp_text}",
         feedback=payload.feedback,
-        emphasis=payload.usps,
+        emphasis=usps,
         assets=assets,
         style_template=payload.style_template
     )
@@ -639,10 +683,15 @@ async def refine_image5(
     if img1:
         assets.append(Asset(type="product_photo", url=img1))
     
-    all_items = [f"ADV:{a}" for a in payload.advantages] + [f"LIM:{l}" for l in payload.limitations]
+    advantages = [a for a in (payload.advantages or []) if a and a.strip()]
+    limitations = [l for l in (payload.limitations or []) if l and l.strip()]
+    all_items = [f"ADV:{a}" for a in advantages] + [f"LIM:{l}" for l in limitations]
+    comp_instruction = "Comparison infographic. Left: Advantages (Green). Right: Limitations (Red)."
+    if not all_items:
+        comp_instruction = "Refine existing comparison infographic layout and clarity using previous text context."
     return await _run_refinement(
-        generator, project_id, context_id, "comparison",
-        instructions="Comparison infographic. Left: Advantages (Green). Right: Limitations (Red).",
+        generator, project_id, context_id, getattr(payload, "job_id", None), "comparison",
+        instructions=comp_instruction,
         feedback=payload.feedback,
         emphasis=all_items,
         assets=assets,
@@ -660,11 +709,13 @@ async def refine_image6(
     if img1:
         assets.append(Asset(type="product_photo", url=img1))
 
+    product_names = [n for n in (payload.product_names or []) if n and n.strip()]
+    cs_instruction = f"Cross-selling grid: {', '.join(product_names)}" if product_names else "Refine existing cross-selling layout using previous context."
     return await _run_refinement(
-        generator, project_id, context_id, "cross_selling",
-        instructions=f"Cross-selling grid: {', '.join(payload.product_names)}",
+        generator, project_id, context_id, getattr(payload, "job_id", None), "cross_selling",
+        instructions=cs_instruction,
         feedback=payload.feedback,
-        emphasis=payload.product_names,
+        emphasis=product_names,
         assets=assets,
         style_template=payload.style_template
     )
@@ -681,9 +732,11 @@ async def refine_image7(
         assets.append(Asset(type="product_photo", url=img1))
 
     emphasis = [payload.headline] if payload.headline else []
+    direction = payload.direction or "Keep previous direction"
+    headline = payload.headline or "Use previous headline context"
     return await _run_refinement(
-        generator, project_id, context_id, "closing",
-        instructions=f"Closing image. Direction: {payload.direction}. Headline: {payload.headline or 'None'}",
+        generator, project_id, context_id, getattr(payload, "job_id", None), "closing",
+        instructions=f"Closing image. Direction: {direction}. Headline: {headline}",
         feedback=payload.feedback,
         emphasis=emphasis,
         assets=assets,

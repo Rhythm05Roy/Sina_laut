@@ -28,18 +28,6 @@ class ImageGenerationRequest(BaseModel):
 class GenerationResponse(BaseModel):
     job_id: str
     status: str
-    context_id: Optional[str] = Field(
-        default=None,
-        description="Step 4 context ID that can be reused in subsequent generation/refine calls."
-    )
-    jobId: Optional[str] = Field(
-        default=None,
-        description="CamelCase alias for integration compatibility."
-    )
-    contextId: Optional[str] = Field(
-        default=None,
-        description="CamelCase alias for integration compatibility."
-    )
     imageUrl: Optional[str] = Field(
         default=None,
         description="Generated image URL or data URL."
