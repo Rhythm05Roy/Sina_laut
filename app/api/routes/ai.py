@@ -387,8 +387,10 @@ async def _run_refinement(
     if not prev_img:
         prev_img = get_generated_image_url(project_id, slot_name)
     if prev_img:
-        # Keep slot-specific image first so refine uses exact per-route context by default.
-        assets.insert(0, Asset(type="product_photo", url=prev_img))
+        # Non-main refinements treat the prior slot output as a visual reference,
+        # not as the new source product photo.
+        ref_type = "product_photo" if slot_name == "main_product" else "reference_image"
+        assets.insert(0, Asset(type=ref_type, url=prev_img))
 
     brief = ImageBrief(
         slot_name=slot_name,
@@ -550,7 +552,7 @@ async def generate_image3(
         assets.append(Asset(type="product_photo", url=img1))
     ref_image_url = merged.get("ref_image_url")
     if ref_image_url:
-        assets.append(Asset(type="product_photo", url=normalize_image_url(ref_image_url)))
+        assets.append(Asset(type="reference_image", url=normalize_image_url(ref_image_url)))
 
     scenario = merged.get("scenario", "Use previous lifestyle context for a marketplace-ready scene.")
     style_template = merged.get("style_template", "playful")
@@ -724,7 +726,7 @@ async def refine_image3(
     if img1:
         assets.append(Asset(type="product_photo", url=img1))
     if merged.get("ref_image_url"):
-        assets.append(Asset(type="product_photo", url=normalize_image_url(merged.get("ref_image_url"))))
+        assets.append(Asset(type="reference_image", url=normalize_image_url(merged.get("ref_image_url"))))
 
     scenario_text = merged.get("scenario", "Keep previous lifestyle scenario context")
     return await _run_refinement(

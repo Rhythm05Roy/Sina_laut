@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import uuid
 from typing import List
 
@@ -8,14 +9,15 @@ from app.schemas.image import GeneratedImage
 from app.schemas.style_template import StyleTemplate
 from app.services.ai_client import AIClient
 from app.services.background_removal import remove_background
-from app.services.keyword_crawler import crawl_keywords
+from app.services.image_compositor import ImageCompositor
+from app.services.image_source_utils import is_supported_image_source
 from app.services.job_store import InMemoryJobStore
-from app.services.prompt_analyzer import PromptAnalyzer
-from app.services.storage import save_image
+from app.services.keyword_crawler import crawl_keywords
+from app.services.pipeline_models import KeywordPlan, ProductAnalysis, ProviderHealth, QAReview
 from app.services.product_analyst import ProductAnalyst
-from app.services.visual_director import VisualDirector
-from app.services.prompt_engineer import PromptEngineer
 from app.services.quality_reviewer import QualityReviewer
+from app.services.slot_planner import SlotPlanner
+from app.services.storage import save_image
 
 
 class ImageGenerationService:
@@ -23,16 +25,146 @@ class ImageGenerationService:
         self.settings = settings
         self.ai_client = AIClient(settings)
         self.jobs = jobs
-        self.prompt_analyzer = PromptAnalyzer(settings) if settings.openai_api_key else None
         self.product_analyst = ProductAnalyst(settings) if settings.openai_api_key else None
         self.quality_reviewer = QualityReviewer(settings) if settings.openai_api_key else None
+        self.slot_planner = SlotPlanner(settings) if settings.openai_api_key else None
+        self.image_compositor = ImageCompositor()
 
-    async def generate(self, payload: ImageGenerationRequest) -> tuple[str, dict]:
+    @staticmethod
+    def _marketplace(payload: ImageGenerationRequest) -> str:
+        return payload.project.target_marketplaces[0] if payload.project.target_marketplaces else "amazon"
+
+    @staticmethod
+    def _analysis_from_dict(raw: dict | None) -> ProductAnalysis:
+        if not raw:
+            return ProductAnalysis()
+        return ProductAnalysis(**{key: value for key, value in raw.items() if key in ProductAnalysis.model_fields})
+
+    @staticmethod
+    def _qa_from_dict(raw: dict | None) -> QAReview | None:
+        if not raw:
+            return None
+        try:
+            return QAReview(**raw)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _analysis_text(analysis: ProductAnalysis) -> str | None:
+        parts = [analysis.visual_style, analysis.lighting, analysis.composition]
+        text = " | ".join(part for part in parts if part)
+        return text or None
+
+    async def _prepare_assets(
+        self, payload: ImageGenerationRequest
+    ) -> tuple[list[tuple[str, str, bool]], list[str], list[str], list[str]]:
+        processed_assets: list[tuple[str, str, bool]] = []
+        product_images: list[str] = []
+        reference_images: list[str] = []
+        warnings: list[str] = []
+
+        for asset in payload.assets:
+            if not is_supported_image_source(asset.url):
+                raise ValueError(
+                    f"Unsupported image source for asset '{asset.type}'. Expected data URL, http(s) URL, or existing local file path."
+                )
+            if self._should_remove_background(payload, asset.type):
+                cleaned_url, changed = await remove_background(asset.url)
+            else:
+                cleaned_url, changed = asset.url, False
+            processed_assets.append((asset.type, cleaned_url, changed))
+            if asset.type == "product_photo":
+                product_images.append(cleaned_url)
+            elif asset.type in {"reference_image", "scene_reference", "ref_image"}:
+                reference_images.append(cleaned_url)
+            else:
+                reference_images.append(cleaned_url)
+
+        if payload.brand.logo_url:
+            if not is_supported_image_source(payload.brand.logo_url):
+                warnings.append("Brand logo source is invalid; logo overlay was skipped.")
+
+        return processed_assets, product_images, reference_images, warnings
+
+    @staticmethod
+    def _dedupe_images(values: list[str]) -> list[str]:
+        unique: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            unique.append(value)
+        return unique
+
+    def _select_generation_images(
+        self,
+        *,
+        slot_name: str,
+        primary_image: str | None,
+        reference_images: list[str],
+    ) -> list[str]:
+        chosen: list[str] = []
+        if primary_image:
+            chosen.append(primary_image)
+        if slot_name == "lifestyle":
+            chosen.extend(reference_images[:1])
+        return self._dedupe_images(chosen)
+
+    async def _build_context(
+        self,
+        payload: ImageGenerationRequest,
+        product_images: list[str],
+    ) -> tuple[ProductAnalysis, KeywordPlan, str | None]:
+        marketplace = self._marketplace(payload)
+        primary_image = next((image for image in product_images if image), None)
+
+        analysis = ProductAnalysis()
+        if self.product_analyst:
+            raw_analysis = await self.product_analyst.run(
+                payload.project,
+                payload.brand,
+                payload.product,
+                marketplace=marketplace,
+                image_url=primary_image,
+            )
+            analysis = self._analysis_from_dict(raw_analysis)
+
+        keyword_plan = await crawl_keywords(
+            payload.product,
+            category=payload.project.product_category,
+            marketplace=marketplace,
+            analysis=analysis.model_dump(),
+        )
+        return analysis, keyword_plan, primary_image
+
+    def _provider_health(self, keyword_plan: KeywordPlan, warnings: list[str]) -> ProviderHealth:
+        return ProviderHealth(
+            openai_image_ready=bool(self.settings.openai_api_key),
+            openai_analysis_ready=bool(self.settings.openai_api_key),
+            gemini_keywords_ready=keyword_plan.source == "gemini" and keyword_plan.available,
+            dataforseo_enabled=bool(self.settings.dataforseo_login and self.settings.dataforseo_password),
+            warnings=list(warnings),
+        )
+
+    @staticmethod
+    def _should_remove_background(payload: ImageGenerationRequest, asset_type: str) -> bool:
+        if not payload.remove_background or asset_type != "product_photo":
+            return False
+        # The main image path now uses AI-based scene cleanup instead of rembg.
+        return not any(brief.slot_name == "main_product" for brief in payload.image_briefs)
+
+    async def _execute(
+        self,
+        payload: ImageGenerationRequest,
+        *,
+        feedback: str | None = None,
+    ) -> tuple[str, dict]:
         job_id = str(uuid.uuid4())
         self.jobs.create(job_id, status="queued")
 
         analysis_meta = {
-            "analysis_used": bool(self.prompt_analyzer),
+            "analysis_used": bool(self.product_analyst and self.slot_planner),
             "analysis_ok": False,
             "analysis_text": None,
             "placeholder_used": False,
@@ -42,105 +174,87 @@ class ImageGenerationService:
         images: List[GeneratedImage] = []
 
         try:
-            # Verify upstream key once
-            await self.ai_client.ensure_ready()
+            processed_assets, product_images, reference_images, warnings = await self._prepare_assets(payload)
+            analysis, keyword_plan, primary_image = await self._build_context(payload, product_images)
+            provider_health = self._provider_health(keyword_plan, warnings)
 
-            processed_assets = []
-            for asset in payload.assets:
-                if payload.remove_background:
-                    cleaned_url, changed = await remove_background(asset.url)
-                else:
-                    cleaned_url, changed = asset.url, False
-                processed_assets.append((asset.type, cleaned_url, changed))
+            analysis_meta["analysis_ok"] = bool(analysis.visual_style or analysis.composition or analysis.lighting)
+            analysis_meta["analysis_text"] = self._analysis_text(analysis)
+            analysis_meta["pipeline"]["provider_health"] = provider_health.model_dump()
+            analysis_meta["pipeline"]["product_analysis"] = analysis.model_dump()
+            analysis_meta["pipeline"]["keyword_plan"] = keyword_plan.model_dump()
 
-            keywords = await crawl_keywords(
-                payload.product,
-                category=payload.project.product_category,
-                marketplace=payload.project.target_marketplaces[0] if payload.project.target_marketplaces else "amazon",
-                analysis=None,
-            )
-
-            input_images: List[str] = [cleaned for _, cleaned, _ in processed_assets if cleaned]
-            if payload.brand.logo_url:
-                input_images.append(payload.brand.logo_url)
-
+            slot_plans = []
+            if payload.image_briefs:
+                await self.ai_client.ensure_ready()
             for brief in payload.image_briefs:
-                analysis = None
-                if self.product_analyst:
-                    analysis = await self.product_analyst.run(
-                        payload.project,
-                        payload.brand,
-                        payload.product,
-                        marketplace=payload.project.target_marketplaces[0] if payload.project.target_marketplaces else "amazon",
-                    )
-                    analysis_meta["pipeline"]["product_analysis"] = analysis
-
-                vision_guidance = None
-                if self.prompt_analyzer and input_images:
-                    vision_guidance = await self.prompt_analyzer.analyze(
-                        input_images[0],
-                        payload.project,
-                        payload.brand,
-                        payload.product,
-                        brief.slot_name,
-                    )
-                    analysis_meta["analysis_ok"] = bool(vision_guidance)
-                    analysis_meta["analysis_text"] = vision_guidance
-
-                strategy = VisualDirector.decide(brief.slot_name, analysis)
-                analysis_meta["pipeline"]["image_strategy"] = strategy
-
-                # Force minimal style template for main image to avoid playful overlays
-                style_tpl = StyleTemplate.MINIMAL if brief.slot_name == "main_product" else payload.style_template
-
-                prompt = PromptEngineer.compose(
-                    payload.project,
-                    payload.brand,
-                    payload.product,
-                    brief,
-                    keywords,
-                    analysis,
-                    strategy,
-                    style_tpl,
+                style_template = StyleTemplate.MINIMAL if brief.slot_name == "main_product" else payload.style_template
+                slot_plan = await self.slot_planner.plan_slot(
+                    project=payload.project,
+                    brand=payload.brand,
+                    product=payload.product,
+                    brief=brief,
+                    style_template=style_template,
+                    analysis=analysis,
+                    keyword_plan=keyword_plan,
+                    primary_image=primary_image,
+                    feedback=feedback,
                 )
-                if vision_guidance:
-                    prompt = f"{vision_guidance}\n\n{prompt}"
+                slot_plans.append(slot_plan.model_dump())
 
-                image_url = await self.ai_client.generate_image(
-                    prompt,
-                    size=self.settings.image_size,
-                    input_images=input_images
-                )
-                if image_url.startswith("https://placehold.co/"):
-                    analysis_meta["placeholder_used"] = True
-                    analysis_meta["error"] = "Upstream model returned placeholder (generation failed)."
+                if brief.slot_name == "main_product":
+                    if not primary_image:
+                        raise ValueError("Main product generation requires a valid source image.")
+                    try:
+                        final_image_url = await self.ai_client.generate_image(
+                            slot_plan.generation_prompt,
+                            size=self.settings.image_size,
+                            input_images=[primary_image],
+                        )
+                    except Exception as exc:
+                        warnings.append(f"Main image AI cleanup failed; used deterministic fallback. {exc}")
+                        final_image_url = await self.image_compositor.compose_main_product(
+                            primary_image,
+                            canvas_size=(1024, 1024),
+                        )
+                else:
+                    generation_images = self._select_generation_images(
+                        slot_name=brief.slot_name,
+                        primary_image=primary_image,
+                        reference_images=reference_images,
+                    )
+                    generated_image_url = await self.ai_client.generate_image(
+                        slot_plan.generation_prompt,
+                        size=self.settings.image_size,
+                        input_images=generation_images,
+                    )
+                    final_image_url = await self.image_compositor.compose(generated_image_url, slot_plan, payload.brand)
+                file_path = await save_image(final_image_url, self.settings.output_dir, f"{job_id}_{brief.slot_name}.png")
 
-                file_path = await save_image(image_url, self.settings.output_dir, f"{job_id}_{brief.slot_name}.png")
                 images.append(
                     GeneratedImage(
                         slot_name=brief.slot_name,
-                        prompt=prompt,
-                        image_url=image_url,
+                        prompt=slot_plan.generation_prompt,
+                        image_url=final_image_url,
                         file_path=file_path,
                         background_removed=any(changed for _, _, changed in processed_assets),
                     )
                 )
 
+            analysis_meta["pipeline"]["slot_plans"] = slot_plans
             self.jobs.set_images(job_id, images)
 
             if images and self.quality_reviewer and images[0].image_url:
-                qa = await self.quality_reviewer.review(images[0].image_url, images[0].slot_name)
+                qa = self._qa_from_dict(await self.quality_reviewer.review(images[0].image_url, images[0].slot_name))
                 if qa:
-                    analysis_meta["pipeline"]["quality_review"] = qa
-                    score = qa.get("score", 1)
-                    if score < 0.5:
-                        analysis_meta["error"] = f"Quality score low ({score}); issues: {qa.get('issues')}"
+                    analysis_meta["pipeline"]["quality_review"] = qa.model_dump()
+                    if qa.score < 0.5:
+                        analysis_meta["error"] = f"Quality score low ({qa.score}); issues: {qa.issues}"
 
-            # Mark failed if placeholder detected
-            if analysis_meta["placeholder_used"]:
-                self.jobs.set_status(job_id, "failed")
-            else:
-                self.jobs.set_status(job_id, "completed")
+            if keyword_plan.warning and not analysis_meta["error"]:
+                analysis_meta["error"] = keyword_plan.warning
+
+            self.jobs.set_status(job_id, "completed")
             return job_id, analysis_meta
 
         except Exception as exc:
@@ -148,112 +262,11 @@ class ImageGenerationService:
             self.jobs.set_status(job_id, "failed")
             return job_id, analysis_meta
 
+    async def generate(self, payload: ImageGenerationRequest) -> tuple[str, dict]:
+        return await self._execute(payload)
+
     async def refine(self, payload: ImageGenerationRequest, feedback: str) -> tuple[str, dict]:
-        job_id = str(uuid.uuid4())
-        self.jobs.create(job_id, status="queued")
-
-        analysis_meta = {
-            "analysis_used": bool(self.prompt_analyzer),
-            "analysis_ok": False,
-            "analysis_text": None,
-            "placeholder_used": False,
-            "error": None,
-            "pipeline": {},
-        }
-        images: List[GeneratedImage] = []
-
-        try:
-            await self.ai_client.ensure_ready()
-            keywords = await crawl_keywords(
-                payload.product,
-                category=payload.project.product_category,
-                marketplace=payload.project.target_marketplaces[0] if payload.project.target_marketplaces else "amazon",
-                analysis=None,
-            )
-
-            input_images: List[str] = [asset.url for asset in payload.assets if asset.url]
-            if payload.brand.logo_url:
-                input_images.append(payload.brand.logo_url)
-
-            for brief in payload.image_briefs:
-                analysis = None
-                if self.product_analyst:
-                    analysis = await self.product_analyst.run(
-                        payload.project,
-                        payload.brand,
-                        payload.product,
-                        marketplace=payload.project.target_marketplaces[0] if payload.project.target_marketplaces else "amazon",
-                    )
-                    analysis_meta["pipeline"]["product_analysis"] = analysis
-
-                vision_guidance = None
-                if self.prompt_analyzer and input_images:
-                    vision_guidance = await self.prompt_analyzer.analyze(
-                        input_images[0],
-                        payload.project,
-                        payload.brand,
-                        payload.product,
-                        brief.slot_name,
-                    )
-                    analysis_meta["analysis_ok"] = bool(vision_guidance)
-                    analysis_meta["analysis_text"] = vision_guidance
-
-                strategy = VisualDirector.decide(brief.slot_name, analysis)
-                analysis_meta["pipeline"]["image_strategy"] = strategy
-
-                prompt = PromptEngineer.compose(
-                    payload.project,
-                    payload.brand,
-                    payload.product,
-                    brief,
-                    keywords,
-                    analysis,
-                    strategy,
-                    payload.style_template,
-                    feedback=feedback,
-                )
-                if vision_guidance:
-                    prompt = f"{vision_guidance}\n\n{prompt}"
-
-                image_url = await self.ai_client.generate_image(
-                    prompt,
-                    size=self.settings.image_size,
-                    input_images=input_images
-                )
-                if image_url.startswith("https://placehold.co/"):
-                    analysis_meta["placeholder_used"] = True
-                    analysis_meta["error"] = "Upstream model returned placeholder (refinement failed)."
-
-                file_path = await save_image(image_url, self.settings.output_dir, f"{job_id}_{brief.slot_name}.png")
-                images.append(
-                    GeneratedImage(
-                        slot_name=brief.slot_name,
-                        prompt=prompt,
-                        image_url=image_url,
-                        file_path=file_path,
-                        background_removed=False,
-                    )
-                )
-
-            self.jobs.set_images(job_id, images)
-            if images and self.quality_reviewer and images[0].image_url:
-                qa = await self.quality_reviewer.review(images[0].image_url, images[0].slot_name)
-                if qa:
-                    analysis_meta["pipeline"]["quality_review"] = qa
-                    score = qa.get("score", 1)
-                    if score < 0.5:
-                        analysis_meta["error"] = f"Quality score low ({score}); issues: {qa.get('issues')}"
-
-            if analysis_meta["placeholder_used"]:
-                self.jobs.set_status(job_id, "failed")
-            else:
-                self.jobs.set_status(job_id, "completed")
-            return job_id, analysis_meta
-
-        except Exception as exc:
-            analysis_meta["error"] = f"Refine exception: {exc}"
-            self.jobs.set_status(job_id, "failed")
-            return job_id, analysis_meta
+        return await self._execute(payload, feedback=feedback)
 
     def get_status(self, job_id: str):
         return self.jobs.get(job_id)

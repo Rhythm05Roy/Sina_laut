@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     # ── Primary AI Provider: Google Gemini ──
     gemini_api_key: Optional[str] = None
     gemini_model: str = "gemini-2.5-flash-image"
+    gemini_text_model: str = "gemini-2.5-flash"
     gemini_base_url: HttpUrl = "https://generativelanguage.googleapis.com/v1beta"
 
     # ── Legacy aliases (backwards compatible with existing .env files) ──
@@ -27,6 +28,9 @@ class Settings(BaseSettings):
 
     # ── Future providers (ready for backend team to plug in) ──
     openai_api_key: Optional[str] = None
+    openai_base_url: HttpUrl = "https://api.openai.com/v1"
+    openai_image_model: str = "gpt-image-1"
+    openai_analysis_model: str = "gpt-4.1-mini"
     stability_api_key: Optional[str] = None
     replicate_api_key: Optional[str] = None
     # DataForSEO credentials (basic auth)
@@ -41,6 +45,11 @@ class Settings(BaseSettings):
     @property
     def active_api_key(self) -> Optional[str]:
         """Returns the active API key, preferring gemini_api_key over legacy alias."""
+        return self.gemini_api_key or self.nano_banana_api_key
+
+    @property
+    def gemini_text_api_key(self) -> Optional[str]:
+        """Returns the Gemini key used for text and multimodal analysis calls."""
         return self.gemini_api_key or self.nano_banana_api_key
 
     @property

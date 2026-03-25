@@ -59,10 +59,10 @@ class PromptEngineer:
             # Add key strategy constraints
             if strategy.get("image_type") == "main":
                 enrichment_parts.append(
-                    "RULES: pure white background, no text, no badges, product fills 85% of frame."
+                    "Marketplace hero image on a pure white background, with no added text or badges, and the product filling most of the frame."
                 )
             if strategy.get("background") and strategy.get("image_type") != "main":
-                enrichment_parts.append(f"Background: {strategy['background']}")
+                enrichment_parts.append(f"Use {strategy['background']} for the background treatment.")
 
         # Combine: enrichments first (brief), then the base prompt
         if enrichment_parts:
