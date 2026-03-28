@@ -2,64 +2,81 @@
 Request schemas for Step 4 individual image generation routes.
 """
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional, Literal
+from typing import Any, Dict, List, Optional, Literal
 
-class KeyFactsConfig(BaseModel):
-    style_template: Optional[str] = None
-    key_facts: Optional[List[str]] = Field(None, min_length=1, max_length=4)
-    background_style: Optional[str] = None
-    logo_position: Optional[str] = None
 
-class LifestyleConfig(BaseModel):
-    style_template: Optional[str] = None
+class Step4Schema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+
+class KeyFactsConfig(Step4Schema):
+    style_template: Optional[str] = Field(None, alias="style")
+    key_facts: Optional[List[str]] = Field(None, alias="keyFacts", min_length=1, max_length=4)
+    background_style: Optional[str] = Field(None, alias="backgroundStyle")
+    logo_position: Optional[str] = Field(None, alias="logoPosition")
+    image_url: Optional[str] = Field(None, alias="imageUrl")
+
+
+class LifestyleConfig(Step4Schema):
+    style_template: Optional[str] = Field(None, alias="style")
     scenario: Optional[str] = None
-    ref_image_url: Optional[str] = None
+    ref_image_url: Optional[str] = Field(None, alias="refImageUrl")
 
-class UspsConfig(BaseModel):
-    style_template: Optional[str] = None
+
+class UspsConfig(Step4Schema):
+    style_template: Optional[str] = Field(None, alias="style")
     usps: Optional[List[str]] = Field(None, min_length=1, max_length=4)
 
-class ComparisonConfig(BaseModel):
-    style_template: Optional[str] = None
+
+class ComparisonConfig(Step4Schema):
+    style_template: Optional[str] = Field(None, alias="style")
     advantages: Optional[List[str]] = None
     limitations: Optional[List[str]] = None
 
-class CrossSellingConfig(BaseModel):
-    style_template: Optional[str] = None
-    product_names: Optional[List[str]] = Field(None, min_length=1, max_length=6)
 
-class ClosingConfig(BaseModel):
-    style_template: Optional[str] = None
+class CrossSellingConfig(Step4Schema):
+    style_template: Optional[str] = Field(None, alias="style")
+    product_names: Optional[List[str]] = Field(None, alias="productNames", min_length=1, max_length=6)
+
+
+class ClosingConfig(Step4Schema):
+    style_template: Optional[str] = Field(None, alias="style")
     direction: Optional[Literal["Emotional", "Inspirational", "Brand Storytelling"]] = None
     headline: Optional[str] = None
 
-class MainRefineConfig(BaseModel):
-    style_template: Optional[str] = None
+
+class MainRefineConfig(Step4Schema):
+    style_template: Optional[str] = Field(None, alias="style")
     feedback: Optional[str] = None
-    image_url: Optional[str] = None
+    image_url: Optional[str] = Field(None, alias="imageUrl")
+
 
 class KeyFactsRefineConfig(KeyFactsConfig):
     feedback: Optional[str] = None
 
+
 class LifestyleRefineConfig(LifestyleConfig):
     feedback: Optional[str] = None
+
 
 class UspsRefineConfig(UspsConfig):
     feedback: Optional[str] = None
 
+
 class ComparisonRefineConfig(ComparisonConfig):
     feedback: Optional[str] = None
+
 
 class CrossSellingRefineConfig(CrossSellingConfig):
     feedback: Optional[str] = None
 
+
 class ClosingRefineConfig(ClosingConfig):
     feedback: Optional[str] = None
 
-class ExternalProjectPayload(BaseModel):
-    """
-    Project payload accepted from external backend integrations.
-    """
+
+class ExternalProjectPayload(Step4Schema):
+    project_id: Optional[str] = Field(None, alias="projectId")
     name: Optional[str] = None
     brandName: Optional[str] = None
     productCategory: Optional[str] = None
@@ -81,81 +98,94 @@ class ExternalProjectPayload(BaseModel):
     image5: Optional[ComparisonConfig] = Field(None, description="Optional defaults for comparison generation")
     image6: Optional[CrossSellingConfig] = Field(None, description="Optional defaults for cross-selling generation")
     image7: Optional[ClosingConfig] = Field(None, description="Optional defaults for closing generation")
-    refine_image1: Optional[MainRefineConfig] = Field(None, description="Optional defaults for main-product refinement")
-    refine_image2: Optional[KeyFactsRefineConfig] = Field(None, description="Optional defaults for key-facts refinement")
-    refine_image3: Optional[LifestyleRefineConfig] = Field(None, description="Optional defaults for lifestyle refinement")
-    refine_image4: Optional[UspsRefineConfig] = Field(None, description="Optional defaults for USP refinement")
-    refine_image5: Optional[ComparisonRefineConfig] = Field(None, description="Optional defaults for comparison refinement")
-    refine_image6: Optional[CrossSellingRefineConfig] = Field(None, description="Optional defaults for cross-selling refinement")
-    refine_image7: Optional[ClosingRefineConfig] = Field(None, description="Optional defaults for closing refinement")
+    refine_image1: Optional[MainRefineConfig] = Field(None, alias="refineImage1", description="Optional defaults for main-product refinement")
+    refine_image2: Optional[KeyFactsRefineConfig] = Field(None, alias="refineImage2", description="Optional defaults for key-facts refinement")
+    refine_image3: Optional[LifestyleRefineConfig] = Field(None, alias="refineImage3", description="Optional defaults for lifestyle refinement")
+    refine_image4: Optional[UspsRefineConfig] = Field(None, alias="refineImage4", description="Optional defaults for USP refinement")
+    refine_image5: Optional[ComparisonRefineConfig] = Field(None, alias="refineImage5", description="Optional defaults for comparison refinement")
+    refine_image6: Optional[CrossSellingRefineConfig] = Field(None, alias="refineImage6", description="Optional defaults for cross-selling refinement")
+    refine_image7: Optional[ClosingRefineConfig] = Field(None, alias="refineImage7", description="Optional defaults for closing refinement")
 
-    model_config = ConfigDict(extra="allow")
 
-class BaseStep4Request(BaseModel):
-    style_template: str = Field("playful", description="Visual style (playful, modern, minimal)")
-    model_config = ConfigDict(extra="allow")
+class BaseStep4Request(Step4Schema):
+    style_template: Optional[str] = Field("playful", alias="style")
 
-class Image1Request(BaseStep4Request):
-    """Main Product Image Request"""
-    project: Optional[ExternalProjectPayload] = Field(
-        None,
-        description="External project payload from integration backend."
-    )
-    image_url: Optional[str] = Field(
-        None,
-        description="Data URL, public URL, or local file path of the main product photo."
-    )
-    model_config = ConfigDict(extra="allow")
 
-class Image2Request(BaseStep4Request):
-    """Key Facts Image Request"""
-    pass
+class ProjectRequestBase(BaseStep4Request):
+    project: Optional[Dict[str, Any]] = None
 
-class Image3Request(BaseStep4Request):
-    """Lifestyle Image Request"""
-    pass
 
-class Image4Request(BaseStep4Request):
-    """USP Highlight Image Request"""
-    pass
+class ProjectContextRequestBase(BaseStep4Request):
+    project_context: Optional[Dict[str, Any]] = Field(None, alias="projectContext")
 
-class Image5Request(BaseStep4Request):
-    """Comparison Image Request"""
-    pass
 
-class Image6Request(BaseStep4Request):
-    """Cross-Selling Image Request"""
-    pass
+class Image1Request(ProjectRequestBase):
+    image_url: Optional[str] = Field(None, alias="imageUrl")
 
-class Image7Request(BaseStep4Request):
-    """Closing Image Request"""
-    pass
 
-# Refinement Requests
-class RefineBaseRequest(BaseModel):
+class Image2Request(ProjectRequestBase):
+    key_facts: Optional[List[str]] = Field(None, alias="keyFacts", min_length=1, max_length=4)
+    background_style: Optional[str] = Field(None, alias="backgroundStyle")
+    logo_position: Optional[str] = Field(None, alias="logoPosition")
+    image_url: Optional[str] = Field(None, alias="imageUrl")
+
+
+class Image3Request(ProjectRequestBase):
+    scenario: Optional[str] = None
+    ref_image_url: Optional[str] = Field(None, alias="refImageUrl")
+
+
+class Image4Request(ProjectContextRequestBase):
+    usps: Optional[List[str]] = Field(None, min_length=1, max_length=4)
+
+
+class Image5Request(ProjectContextRequestBase):
+    advantages: Optional[List[str]] = None
+    limitations: Optional[List[str]] = None
+
+
+class Image6Request(ProjectContextRequestBase):
+    product_names: Optional[List[str]] = Field(None, alias="productNames", min_length=1, max_length=6)
+
+
+class Image7Request(ProjectContextRequestBase):
+    direction: Optional[str] = None
+    headline: Optional[str] = None
+
+
+class RefineBaseRequest(ProjectContextRequestBase):
     feedback: str = Field(..., description="Refinement instructions")
-    model_config = ConfigDict(extra="allow")
 
-class Image1RefineRequest(BaseStep4Request, RefineBaseRequest):
-    image_url: Optional[str] = Field(
-        None,
-        description="Optional new product image source for refinement. If omitted, previous generated context is used."
-    )
 
-class Image2RefineRequest(BaseStep4Request, RefineBaseRequest):
-    pass
+class Image1RefineRequest(RefineBaseRequest):
+    image_url: Optional[str] = Field(None, alias="imageUrl")
 
-class Image3RefineRequest(BaseStep4Request, RefineBaseRequest):
-    pass
 
-class Image4RefineRequest(BaseStep4Request, RefineBaseRequest):
-    pass
+class Image2RefineRequest(RefineBaseRequest):
+    key_facts: Optional[List[str]] = Field(None, alias="keyFacts", min_length=1, max_length=4)
+    background_style: Optional[str] = Field(None, alias="backgroundStyle")
+    logo_position: Optional[str] = Field(None, alias="logoPosition")
+    image_url: Optional[str] = Field(None, alias="imageUrl")
 
-class Image5RefineRequest(BaseStep4Request, RefineBaseRequest):
-    pass
 
-class Image6RefineRequest(BaseStep4Request, RefineBaseRequest):
-    pass
+class Image3RefineRequest(RefineBaseRequest):
+    scenario: Optional[str] = None
+    ref_image_url: Optional[str] = Field(None, alias="refImageUrl")
 
-class Image7RefineRequest(BaseStep4Request, RefineBaseRequest):
-    pass
+
+class Image4RefineRequest(RefineBaseRequest):
+    usps: Optional[List[str]] = Field(None, min_length=1, max_length=4)
+
+
+class Image5RefineRequest(RefineBaseRequest):
+    advantages: Optional[List[str]] = None
+    limitations: Optional[List[str]] = None
+
+
+class Image6RefineRequest(RefineBaseRequest):
+    product_names: Optional[List[str]] = Field(None, alias="productNames", min_length=1, max_length=6)
+
+
+class Image7RefineRequest(RefineBaseRequest):
+    direction: Optional[str] = None
+    headline: Optional[str] = None

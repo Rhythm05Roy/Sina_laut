@@ -8,6 +8,7 @@ from app.schemas.image import ImageBrief
 from app.schemas.product import ProductInfo
 from app.schemas.project import ProjectSetup
 from app.schemas.style_template import StyleTemplate
+from app.services.gemini_market_planner import GeminiMarketPlanner
 from app.services.pipeline_models import (
     CompositionPlan,
     KeywordPlan,
@@ -24,6 +25,7 @@ INTENT_TERMS = {"buy", "best", "price", "deal", "offer", "cheap", "discount"}
 class SlotPlanner:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self.market_planner = GeminiMarketPlanner(settings)
 
     async def plan_slot(
         self,
@@ -38,7 +40,16 @@ class SlotPlanner:
         primary_image: str | None = None,
         feedback: str | None = None,
     ) -> SlotPlan:
-        copy_plan = self._build_copy_plan(brief, product, keyword_plan)
+        marketplace = project.target_marketplaces[0] if project.target_marketplaces else "amazon"
+        slot_hints = await self.market_planner.plan_slot(
+            project=project,
+            product=product,
+            brief=brief,
+            analysis=analysis,
+            keyword_plan=keyword_plan,
+            marketplace=marketplace,
+        )
+        copy_plan = self._build_copy_plan(brief, product, keyword_plan, slot_hints)
         visual_plan = self._build_visual_plan(brief, style_template, analysis, copy_plan)
         generation_prompt = self._build_draft_prompt(
             project=project,
@@ -84,8 +95,15 @@ class SlotPlanner:
         ]
         return self._clean_items(filtered, limit)
 
-    def _build_copy_plan(self, brief: ImageBrief, product: ProductInfo, keyword_plan: KeywordPlan) -> SlotCopyPlan:
+    def _build_copy_plan(
+        self,
+        brief: ImageBrief,
+        product: ProductInfo,
+        keyword_plan: KeywordPlan,
+        slot_hints: dict[str, object] | None = None,
+    ) -> SlotCopyPlan:
         slot_name = brief.slot_name
+        slot_hints = slot_hints or {}
         explicit = self._clean_items(brief.emphasis, 8)
         keyword_text = self._keyword_text(keyword_plan, 8)
 
@@ -93,7 +111,8 @@ class SlotPlanner:
             return SlotCopyPlan(overlay_enabled=False, notes=["main image does not allow overlays"])
 
         if slot_name == "key_facts":
-            callouts = explicit[:4] or keyword_text[:4]
+            hinted = self._clean_items(slot_hints.get("callouts", []), 4)
+            callouts = hinted[:4] or explicit[:4] or keyword_text[:4]
             return SlotCopyPlan(
                 overlay_enabled=bool(callouts),
                 callouts=callouts,
@@ -101,31 +120,35 @@ class SlotPlanner:
             )
 
         if slot_name == "lifestyle":
-            callouts = explicit[:3] or keyword_text[:3]
+            hinted = self._clean_items(slot_hints.get("callouts", []), 3)
+            callouts = hinted[:3] or explicit[:3] or keyword_text[:3]
             return SlotCopyPlan(
                 overlay_enabled=bool(callouts),
+                scenario=self._clean_items([slot_hints.get("scenario", "")], 1)[0] if slot_hints.get("scenario") else None,
                 callouts=callouts,
                 notes=["keep claims minimal and contextual", "use visual-only output if no overlay text available"],
             )
 
         if slot_name == "usps":
-            if len(explicit) == 1:
+            hinted_headline = self._clean_items([slot_hints.get("headline", "")], 1)[0] if slot_hints.get("headline") else None
+            hinted_callouts = self._clean_items(slot_hints.get("callouts", []), 3)
+            if len(explicit) == 1 and not hinted_callouts:
                 return SlotCopyPlan(
                     overlay_enabled=True,
-                    headline=explicit[0],
+                    headline=hinted_headline or explicit[0],
                     notes=["single focused headline"],
                 )
-            callouts = explicit[:3] or keyword_text[:3]
+            callouts = hinted_callouts[:3] or explicit[:3] or keyword_text[:3]
             return SlotCopyPlan(
                 overlay_enabled=bool(callouts),
                 callouts=callouts,
-                headline=explicit[0] if explicit and len(explicit) > 1 else None,
+                headline=hinted_headline or (explicit[0] if explicit and len(explicit) > 1 else None),
                 notes=["use structured USP callouts", "no free-floating badges"],
             )
 
         if slot_name == "comparison":
-            left = [item[4:] for item in explicit if item.startswith("ADV:")]
-            right = [item[4:] for item in explicit if item.startswith("LIM:")]
+            left = self._clean_items(slot_hints.get("comparison_left", []), 3) or [item[4:] for item in explicit if item.startswith("ADV:")]
+            right = self._clean_items(slot_hints.get("comparison_right", []), 3) or [item[4:] for item in explicit if item.startswith("LIM:")]
             if not left and keyword_text:
                 left = keyword_text[:3]
             if not right and keyword_plan.available:
@@ -142,7 +165,7 @@ class SlotPlanner:
             )
 
         if slot_name == "cross_selling":
-            labels = explicit[:6]
+            labels = self._clean_items(slot_hints.get("product_labels", []), 6) or explicit[:6]
             return SlotCopyPlan(
                 overlay_enabled=bool(labels),
                 product_labels=labels,
@@ -150,13 +173,14 @@ class SlotPlanner:
             )
 
         if slot_name == "closing":
-            closing_line = explicit[0] if explicit else None
+            closing_line = self._clean_items([slot_hints.get("closing_line", "")], 1)[0] if slot_hints.get("closing_line") else (explicit[0] if explicit else None)
             if not closing_line and keyword_plan.available:
                 keyword = keyword_plan.primary[0] if keyword_plan.primary else ""
                 if keyword:
                     closing_line = f"{product.title} | {keyword.title()}"
             return SlotCopyPlan(
                 overlay_enabled=bool(closing_line),
+                headline=self._clean_items([slot_hints.get("headline", "")], 1)[0] if slot_hints.get("headline") else None,
                 closing_line=closing_line,
                 notes=["single controlled closing line only"],
             )
@@ -326,39 +350,44 @@ class SlotPlanner:
 
         if slot_name == "key_facts":
             parts.extend([
-                "Professional infographic base with product dominant on the left.",
+                "Generate a clean premium infographic background only, with no product object included.",
+                "Left side stays open for the exact product image to be composited later.",
                 "Right side stays clean and balanced for structured fact cards.",
                 "Commercial studio look, polished and marketplace-ready.",
             ])
         elif slot_name == "lifestyle":
-            scenario = brief.instructions.strip() if brief.instructions else "Real-world aspirational usage scene."
+            scenario = copy_plan.scenario or (brief.instructions.strip() if brief.instructions else "Real-world aspirational usage scene.")
             parts.extend([
                 scenario,
-                "Product remains clearly recognizable and hero-focused.",
+                "Generate the believable lifestyle environment only, leaving clear foreground space for the exact product to be composited later.",
                 "Natural commercial photography, believable environment, no stock-photo clutter.",
             ])
         elif slot_name == "usps":
             parts.extend([
-                "Product centered with calm surrounding space for structured callouts.",
+                "Generate a clean premium background only, with no product object included.",
+                "Leave the left side open for the exact product image and the right side for structured callouts.",
                 "Balanced premium composition, no floating graphic elements in the base image.",
             ])
             if copy_plan.headline:
                 parts.append(f"Visual theme should support this headline: {copy_plan.headline}.")
         elif slot_name == "comparison":
             parts.extend([
-                "Clean neutral backdrop with balanced open areas for a two-column comparison board.",
-                "Product remains a supporting hero element, not oversized.",
+                "Generate a clean neutral backdrop only, with no product object included.",
+                "Leave space for a supporting hero product panel and a two-column comparison board.",
             ])
         elif slot_name == "cross_selling":
             parts.extend([
-                "Hero product area at top with clean lower region for related product grid.",
-                "Keep the scene minimal and organized for later product labels.",
+                "Generate a clean brand-consistent background only, with no product objects included.",
+                "Keep the top-left hero region and lower grid region clean for later composition.",
             ])
         elif slot_name == "closing":
             parts.extend([
-                "Premium emotional hero visual with a clean lower strip for one closing line.",
+                "Generate a premium campaign background only, with no product object included.",
+                "Keep the center hero region and lower strip clean for later composition.",
                 "Strong campaign finish, realistic materials, controlled atmosphere.",
             ])
+            if copy_plan.headline:
+                parts.append(f"Visual direction should support this headline: {copy_plan.headline}.")
             if copy_plan.closing_line:
                 parts.append(f"Visual tone should support this closing line: {copy_plan.closing_line}.")
 

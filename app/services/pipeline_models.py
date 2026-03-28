@@ -38,6 +38,7 @@ class SlotCopyPlan(BaseModel):
     overlay_enabled: bool = False
     headline: Optional[str] = None
     subheadline: Optional[str] = None
+    scenario: Optional[str] = None
     callouts: list[str] = Field(default_factory=list)
     comparison_left: list[str] = Field(default_factory=list)
     comparison_right: list[str] = Field(default_factory=list)

@@ -57,10 +57,12 @@ class ImageGenerationService:
 
     async def _prepare_assets(
         self, payload: ImageGenerationRequest
-    ) -> tuple[list[tuple[str, str, bool]], list[str], list[str], list[str]]:
+    ) -> tuple[list[tuple[str, str, bool]], list[str], list[str], list[str], list[str], list[str]]:
         processed_assets: list[tuple[str, str, bool]] = []
         product_images: list[str] = []
         reference_images: list[str] = []
+        source_images: list[str] = []
+        related_images: list[str] = []
         warnings: list[str] = []
 
         for asset in payload.assets:
@@ -75,6 +77,10 @@ class ImageGenerationService:
             processed_assets.append((asset.type, cleaned_url, changed))
             if asset.type == "product_photo":
                 product_images.append(cleaned_url)
+            elif asset.type in {"source_photo", "main_raw", "original_product"}:
+                source_images.append(cleaned_url)
+            elif asset.type in {"related_product", "related_image"}:
+                related_images.append(cleaned_url)
             elif asset.type in {"reference_image", "scene_reference", "ref_image"}:
                 reference_images.append(cleaned_url)
             else:
@@ -84,7 +90,7 @@ class ImageGenerationService:
             if not is_supported_image_source(payload.brand.logo_url):
                 warnings.append("Brand logo source is invalid; logo overlay was skipped.")
 
-        return processed_assets, product_images, reference_images, warnings
+        return processed_assets, product_images, reference_images, source_images, related_images, warnings
 
     @staticmethod
     def _dedupe_images(values: list[str]) -> list[str]:
@@ -101,12 +107,9 @@ class ImageGenerationService:
         self,
         *,
         slot_name: str,
-        primary_image: str | None,
         reference_images: list[str],
     ) -> list[str]:
         chosen: list[str] = []
-        if primary_image:
-            chosen.append(primary_image)
         if slot_name == "lifestyle":
             chosen.extend(reference_images[:1])
         return self._dedupe_images(chosen)
@@ -115,9 +118,11 @@ class ImageGenerationService:
         self,
         payload: ImageGenerationRequest,
         product_images: list[str],
-    ) -> tuple[ProductAnalysis, KeywordPlan, str | None]:
+        source_images: list[str],
+    ) -> tuple[ProductAnalysis, KeywordPlan, str | None, str | None]:
         marketplace = self._marketplace(payload)
         primary_image = next((image for image in product_images if image), None)
+        source_image = next((image for image in source_images if image), None) or primary_image
 
         analysis = ProductAnalysis()
         if self.product_analyst:
@@ -126,7 +131,7 @@ class ImageGenerationService:
                 payload.brand,
                 payload.product,
                 marketplace=marketplace,
-                image_url=primary_image,
+                image_url=source_image,
             )
             analysis = self._analysis_from_dict(raw_analysis)
 
@@ -136,7 +141,7 @@ class ImageGenerationService:
             marketplace=marketplace,
             analysis=analysis.model_dump(),
         )
-        return analysis, keyword_plan, primary_image
+        return analysis, keyword_plan, primary_image, source_image
 
     def _provider_health(self, keyword_plan: KeywordPlan, warnings: list[str]) -> ProviderHealth:
         return ProviderHealth(
@@ -174,8 +179,8 @@ class ImageGenerationService:
         images: List[GeneratedImage] = []
 
         try:
-            processed_assets, product_images, reference_images, warnings = await self._prepare_assets(payload)
-            analysis, keyword_plan, primary_image = await self._build_context(payload, product_images)
+            processed_assets, product_images, reference_images, source_images, related_images, warnings = await self._prepare_assets(payload)
+            analysis, keyword_plan, primary_image, source_image = await self._build_context(payload, product_images, source_images)
             provider_health = self._provider_health(keyword_plan, warnings)
 
             analysis_meta["analysis_ok"] = bool(analysis.visual_style or analysis.composition or analysis.lighting)
@@ -203,32 +208,40 @@ class ImageGenerationService:
                 slot_plans.append(slot_plan.model_dump())
 
                 if brief.slot_name == "main_product":
-                    if not primary_image:
+                    if not source_image:
                         raise ValueError("Main product generation requires a valid source image.")
                     try:
                         final_image_url = await self.ai_client.generate_image(
                             slot_plan.generation_prompt,
                             size=self.settings.image_size,
-                            input_images=[primary_image],
+                            input_images=[source_image],
                         )
                     except Exception as exc:
                         warnings.append(f"Main image AI cleanup failed; used deterministic fallback. {exc}")
                         final_image_url = await self.image_compositor.compose_main_product(
-                            primary_image,
+                            source_image,
                             canvas_size=(1024, 1024),
                         )
                 else:
-                    generation_images = self._select_generation_images(
-                        slot_name=brief.slot_name,
-                        primary_image=primary_image,
-                        reference_images=reference_images,
+                    generated_image_url = None
+                    if brief.slot_name == "lifestyle":
+                        generation_images = self._select_generation_images(
+                            slot_name=brief.slot_name,
+                            reference_images=reference_images,
+                        )
+                        generated_image_url = await self.ai_client.generate_image(
+                            slot_plan.generation_prompt,
+                            size=self.settings.image_size,
+                            input_images=generation_images or None,
+                        )
+                    final_image_url = await self.image_compositor.compose(
+                        generated_image_url,
+                        slot_plan,
+                        payload.brand,
+                        hero_image_url=primary_image,
+                        raw_product_url=source_image,
+                        related_image_urls=related_images,
                     )
-                    generated_image_url = await self.ai_client.generate_image(
-                        slot_plan.generation_prompt,
-                        size=self.settings.image_size,
-                        input_images=generation_images,
-                    )
-                    final_image_url = await self.image_compositor.compose(generated_image_url, slot_plan, payload.brand)
                 file_path = await save_image(final_image_url, self.settings.output_dir, f"{job_id}_{brief.slot_name}.png")
 
                 images.append(
