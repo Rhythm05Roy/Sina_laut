@@ -87,18 +87,28 @@ class ImageCompositor:
         small_font = self._font(max(15, width // 54), bold=False, ImageFont=ImageFont)
 
         if slot == "key_facts":
-            await self._paste_hero_panel(canvas, hero_image_url, (margin, margin, int(width * 0.57), height - margin))
+            await self._paste_hero_cutout(
+                canvas,
+                hero_image_url=hero_image_url,
+                raw_product_url=raw_product_url,
+                box=(int(width * 0.06), int(height * 0.16), int(width * 0.50), int(height * 0.88)),
+            )
             self._compose_key_facts(draw, width, height, margin, slot_plan.copy_plan.callouts[:4], primary, secondary, text_dark, white, heading_font, body_font)
         elif slot == "lifestyle":
             await self._paste_lifestyle_product(
                 canvas,
                 hero_image_url=hero_image_url,
                 raw_product_url=raw_product_url,
-                box=(int(width * 0.12), int(height * 0.18), int(width * 0.48), int(height * 0.84)),
+                box=(int(width * 0.18), int(height * 0.18), int(width * 0.56), int(height * 0.86)),
             )
             self._compose_lifestyle(draw, width, height, margin, slot_plan.copy_plan.callouts[:3], primary, text_dark, white, body_font, small_font)
         elif slot == "usps":
-            await self._paste_hero_panel(canvas, hero_image_url, (margin, margin, int(width * 0.57), height - margin))
+            await self._paste_hero_cutout(
+                canvas,
+                hero_image_url=hero_image_url,
+                raw_product_url=raw_product_url,
+                box=(int(width * 0.27), int(height * 0.12), int(width * 0.73), int(height * 0.84)),
+            )
             self._compose_usps(draw, width, height, margin, slot_plan.copy_plan, primary, secondary, text_dark, white, heading_font, body_font)
         elif slot == "comparison":
             await self._paste_hero_panel(canvas, hero_image_url, (margin, margin, width - margin, int(height * 0.48)))
@@ -120,7 +130,12 @@ class ImageCompositor:
                 small_font,
             )
         elif slot == "closing":
-            await self._paste_hero_panel(canvas, hero_image_url, (int(width * 0.18), margin, int(width * 0.82), int(height * 0.62)))
+            await self._paste_hero_cutout(
+                canvas,
+                hero_image_url=hero_image_url,
+                raw_product_url=raw_product_url,
+                box=(int(width * 0.46), int(height * 0.12), int(width * 0.88), int(height * 0.84)),
+            )
             self._compose_closing(draw, width, height, margin, slot_plan.copy_plan.closing_line or "", primary, white, heading_font)
 
         if brand.logo_url and slot_plan.visual_plan.logo_allowed:
@@ -183,7 +198,7 @@ class ImageCompositor:
 
     def _draw_card(self, draw, box, fill, shadow, radius=24):
         x1, y1, x2, y2 = box
-        draw.rounded_rectangle((x1 + 8, y1 + 10, x2 + 8, y2 + 10), radius=radius, fill=shadow)
+        draw.rounded_rectangle((x1 + 4, y1 + 6, x2 + 4, y2 + 6), radius=radius, fill=shadow)
         draw.rounded_rectangle(box, radius=radius, fill=fill)
 
     def _create_template_canvas(self, size, primary, secondary, slot_name):
@@ -191,17 +206,37 @@ class ImageCompositor:
         width, height = size
         canvas = Image.new("RGBA", size, (247, 248, 251, 255))
         draw = ImageDraw.Draw(canvas)
-        top = self._mix_rgba((255, 255, 255, 255), primary, 0.06)
-        bottom = self._mix_rgba((255, 255, 255, 255), secondary, 0.08)
+        if slot_name == "closing":
+            top = self._mix_rgba((16, 27, 54, 255), primary, 0.18)
+            bottom = self._mix_rgba((92, 83, 188, 255), secondary, 0.10)
+        elif slot_name == "key_facts":
+            top = (251, 252, 255, 255)
+            bottom = self._mix_rgba((232, 238, 252, 255), secondary, 0.12)
+        elif slot_name == "usps":
+            top = self._mix_rgba((232, 241, 255, 255), primary, 0.14)
+            bottom = self._mix_rgba((234, 226, 255, 255), secondary, 0.18)
+        elif slot_name == "comparison":
+            top = (252, 252, 254, 255)
+            bottom = self._mix_rgba((244, 247, 255, 255), secondary, 0.16)
+        elif slot_name == "cross_selling":
+            top = (252, 251, 248, 255)
+            bottom = self._mix_rgba((244, 247, 251, 255), secondary, 0.12)
+        else:
+            top = self._mix_rgba((255, 255, 255, 255), primary, 0.04)
+            bottom = self._mix_rgba((250, 251, 255, 255), secondary, 0.08)
         for y in range(height):
             t = y / max(height - 1, 1)
             fill = self._mix_rgba(top, bottom, t)
             draw.line((0, y, width, y), fill=fill, width=1)
-        panel_fill = (255, 255, 255, 120)
-        if slot_name in {"comparison", "closing"}:
-            draw.rounded_rectangle((24, 24, width - 24, height - 24), radius=36, fill=panel_fill)
-        else:
-            draw.rounded_rectangle((28, 28, width - 28, height - 28), radius=30, fill=(255, 255, 255, 100))
+        if slot_name == "key_facts":
+            draw.ellipse((int(width * 0.01), int(height * 0.18), int(width * 0.52), int(height * 0.86)), fill=(255, 255, 255, 152))
+            draw.ellipse((int(width * 0.14), int(height * 0.08), int(width * 0.48), int(height * 0.48)), fill=(255, 255, 255, 88))
+        elif slot_name == "usps":
+            draw.ellipse((int(width * 0.05), int(height * 0.18), int(width * 0.58), int(height * 0.88)), fill=(255, 255, 255, 104))
+        elif slot_name == "comparison":
+            draw.rounded_rectangle((20, 20, width - 20, height - 20), radius=34, fill=(255, 255, 255, 112))
+        elif slot_name == "closing":
+            draw.ellipse((int(width * 0.34), int(height * 0.16), int(width * 0.94), int(height * 0.92)), fill=(255, 255, 255, 24))
         return canvas
 
     def _mix_rgba(self, a, b, t: float):
@@ -223,9 +258,28 @@ class ImageCompositor:
         paste_y = inner[1] + max(0, (inner[3] - inner[1] - hero.size[1]) // 2)
         canvas.alpha_composite(hero, (paste_x, paste_y))
 
+    async def _paste_hero_cutout(self, canvas, *, hero_image_url: str | None, raw_product_url: str | None, box):
+        Image, _, ImageDraw, _ = self._pil_modules()
+        product = await self._load_product_cutout(hero_image_url, raw_product_url)
+        if product is None:
+            await self._paste_hero_panel(canvas, hero_image_url, box)
+            return
+        x1, y1, x2, y2 = box
+        product = self._fit_image(product, (x2 - x1, y2 - y1), Image.LANCZOS)
+        shadow_h = max(24, product.size[1] // 9)
+        shadow = Image.new("RGBA", (int(product.size[0] * 0.72), shadow_h), (0, 0, 0, 0))
+        shadow_draw = ImageDraw.Draw(shadow)
+        shadow_draw.ellipse((0, 0, shadow.size[0], shadow.size[1]), fill=(0, 0, 0, 52))
+        px = x1 + max(0, ((x2 - x1) - product.size[0]) // 2)
+        py = y1 + max(0, ((y2 - y1) - product.size[1]) // 2)
+        sx = px + (product.size[0] - shadow.size[0]) // 2
+        sy = py + product.size[1] - shadow.size[1] // 2
+        canvas.alpha_composite(shadow, (sx, sy))
+        canvas.alpha_composite(product, (px, py))
+
     async def _paste_lifestyle_product(self, canvas, *, hero_image_url: str | None, raw_product_url: str | None, box):
         Image, _, ImageDraw, _ = self._pil_modules()
-        product = await self._load_product_cutout(raw_product_url, hero_image_url)
+        product = await self._load_product_cutout(hero_image_url, raw_product_url)
         if product is None:
             await self._paste_hero_panel(canvas, hero_image_url, box)
             return
@@ -242,21 +296,67 @@ class ImageCompositor:
         canvas.alpha_composite(shadow, (sx, sy))
         canvas.alpha_composite(product, (px, py))
 
-    async def _load_product_cutout(self, raw_product_url: str | None, hero_image_url: str | None):
-        candidate = raw_product_url or hero_image_url
-        if not candidate:
-            return None
+    async def _load_product_cutout(self, hero_image_url: str | None, raw_product_url: str | None):
+        if hero_image_url:
+            try:
+                hero = await load_pil_image(hero_image_url)
+                hero = hero.convert("RGBA")
+                hero_cutout = await self._remove_background_from_pil(hero)
+                if hero_cutout is not None:
+                    alpha = hero_cutout.getchannel("A")
+                    bbox = alpha.getbbox()
+                    if bbox:
+                        return hero_cutout.crop(bbox)
+                cutout = self._make_transparent_from_white(hero)
+                alpha = cutout.getchannel("A")
+                bbox = alpha.getbbox()
+                if bbox and self._bbox_is_reasonable(bbox, cutout.size):
+                    return cutout.crop(bbox)
+            except Exception:
+                pass
+        if raw_product_url:
+            try:
+                raw = await load_pil_image(raw_product_url)
+                raw = raw.convert("RGBA")
+                cutout = await self._remove_background_from_pil(raw)
+                if cutout is None:
+                    cutout = self._make_transparent_from_white(raw)
+                alpha = cutout.getchannel("A")
+                bbox = alpha.getbbox()
+                if bbox and self._bbox_is_reasonable(bbox, cutout.size):
+                    cutout = cutout.crop(bbox)
+                return cutout
+            except Exception:
+                return None
+        return None
+
+    async def _remove_background_from_pil(self, image):
         try:
-            cleaned, _ = await remove_background(candidate)
-            cutout = await load_pil_image(cleaned)
-            cutout = cutout.convert("RGBA")
-            alpha = cutout.getchannel("A")
-            bbox = alpha.getbbox()
-            if bbox:
-                cutout = cutout.crop(bbox)
-            return cutout
+            cleaned_url, changed = await remove_background(pil_image_to_data_url(image))
+            if not changed:
+                return None
+            cutout = await load_pil_image(cleaned_url)
+            return cutout.convert("RGBA")
         except Exception:
             return None
+
+    def _bbox_is_reasonable(self, bbox, size):
+        x1, y1, x2, y2 = bbox
+        width, height = size
+        bbox_w = max(1, x2 - x1)
+        bbox_h = max(1, y2 - y1)
+        return (bbox_w / max(width, 1)) < 0.92 and (bbox_h / max(height, 1)) < 0.95
+
+    def _make_transparent_from_white(self, image):
+        rgba = image.copy().convert("RGBA")
+        pixels = rgba.load()
+        width, height = rgba.size
+        for y in range(height):
+            for x in range(width):
+                r, g, b, a = pixels[x, y]
+                if r > 242 and g > 242 and b > 242 and max(r, g, b) - min(r, g, b) < 18:
+                    pixels[x, y] = (r, g, b, 0)
+        return rgba
 
     def _fit_image(self, image, target_size, resample):
         width, height = target_size
@@ -279,58 +379,72 @@ class ImageCompositor:
     def _compose_key_facts(self, draw, width, height, margin, callouts, primary, secondary, text_dark, white, heading_font, body_font):
         if not callouts:
             return
-        region_x1 = int(width * 0.61)
+        eyebrow_font = self._font(max(15, width // 62), bold=False, ImageFont=self._pil_modules()[3])
+        card_font = self._font(max(26, width // 28), bold=True, ImageFont=self._pil_modules()[3])
+        draw.text((margin, margin), "MARKETPLACE HIGHLIGHTS", font=eyebrow_font, fill=(*primary[:3], 182))
+        draw.text((margin, margin + 24), "Key facts", font=heading_font, fill=text_dark)
+
+        region_x1 = int(width * 0.57)
+        region_y1 = int(height * 0.15)
         card_w = width - region_x1 - margin
-        card_h = max(110, int((height - margin * 5) / 4))
+        card_gap = 18
+        card_h = max(120, int((height - region_y1 - margin - card_gap * 3) / 4))
         for idx, text in enumerate(callouts[:4]):
-            y1 = margin + idx * (card_h + 12)
+            y1 = region_y1 + idx * (card_h + card_gap)
             y2 = y1 + card_h
             box = (region_x1, y1, region_x1 + card_w, y2)
-            fill = (255, 255, 255, 238)
-            shadow = (0, 0, 0, 24)
-            self._draw_card(draw, box, fill, shadow, radius=20)
+            fill = (255, 255, 255, 246)
+            shadow = (33, 42, 58, 16)
+            self._draw_card(draw, box, fill, shadow, radius=24)
+            draw.rounded_rectangle(box, radius=24, outline=(224, 228, 238, 255), width=2)
+
             accent = primary if idx % 2 == 0 else secondary
-            draw.rounded_rectangle((region_x1 + 14, y1 + 16, region_x1 + 28, y2 - 16), radius=8, fill=accent)
-            lines = self._wrap_text(draw, text, heading_font, card_w - 58)
-            self._draw_text_block(draw, lines[:3], (region_x1 + 42, y1 + 24), heading_font, text_dark, line_gap=6)
+            draw.rounded_rectangle((region_x1 + 20, y1 + 20, region_x1 + 26, y2 - 20), radius=4, fill=accent)
+            tag = f"{idx + 1:02d}"
+            draw.text((region_x1 + 42, y1 + 18), tag, font=eyebrow_font, fill=(*primary[:3], 160))
+            lines = self._wrap_text(draw, text, card_font, card_w - 76)
+            self._draw_text_block(draw, lines[:2], (region_x1 + 42, y1 + 42), card_font, text_dark, line_gap=4)
 
     def _compose_lifestyle(self, draw, width, height, margin, callouts, primary, text_dark, white, body_font, small_font):
         if not callouts:
             return
-        strip_h = max(150, height // 5)
+        strip_h = max(144, height // 5)
         y1 = height - strip_h - margin
-        overlay = (255, 255, 255, 216)
+        overlay = (255, 255, 255, 224)
         draw.rounded_rectangle((margin, y1, width - margin, height - margin), radius=28, fill=overlay)
-        title = "Marketplace Highlights"
+        title = "Everyday Performance"
         draw.text((margin + 20, y1 + 16), title, font=body_font, fill=text_dark)
         for idx, line in enumerate(callouts[:3]):
             bullet_y = y1 + 58 + idx * 30
             draw.text((margin + 24, bullet_y), f"- {line}", font=small_font, fill=primary)
 
     def _compose_usps(self, draw, width, height, margin, copy_plan, primary, secondary, text_dark, white, heading_font, body_font):
-        x1 = int(width * 0.62)
-        panel_w = width - x1 - margin
-        current_y = margin
+        positions = [
+            (margin, int(height * 0.16), int(width * 0.27), int(height * 0.30)),
+            (int(width * 0.71), int(height * 0.16), width - margin, int(height * 0.30)),
+            (margin, int(height * 0.58), int(width * 0.27), int(height * 0.72)),
+            (int(width * 0.71), int(height * 0.58), width - margin, int(height * 0.72)),
+        ]
         if copy_plan.headline:
-            self._draw_card(draw, (x1, current_y, x1 + panel_w, current_y + 96), (255, 255, 255, 244), (0, 0, 0, 24), radius=24)
-            draw.rounded_rectangle((x1 + 14, current_y + 16, x1 + 28, current_y + 80), radius=7, fill=primary)
-            lines = self._wrap_text(draw, copy_plan.headline, heading_font, panel_w - 32)
-            self._draw_text_block(draw, lines[:2], (x1 + 42, current_y + 22), heading_font, text_dark, line_gap=4)
-            current_y += 112
-        for idx, line in enumerate(copy_plan.callouts[:3]):
-            box = (x1, current_y, x1 + panel_w, current_y + 92)
-            self._draw_card(draw, box, (255, 255, 255, 240), (0, 0, 0, 22), radius=22)
+            lines = self._wrap_text(draw, copy_plan.headline, heading_font, width - margin * 2)
+            self._draw_text_block(draw, lines[:2], (margin, margin), heading_font, text_dark, line_gap=4)
+        callout_y_shift = 0 if not copy_plan.headline else 38
+        for idx, line in enumerate(copy_plan.callouts[:4]):
+            x1, y1, x2, y2 = positions[idx]
+            y1 += callout_y_shift
+            y2 += callout_y_shift
+            box = (x1, y1, x2, y2)
+            self._draw_card(draw, box, (255, 255, 255, 240), (48, 56, 72, 18), radius=22)
             accent = primary if idx % 2 == 0 else secondary
-            draw.rounded_rectangle((x1 + 14, current_y + 16, x1 + 26, current_y + 76), radius=6, fill=accent)
-            wrapped = self._wrap_text(draw, line, body_font, panel_w - 48)
-            self._draw_text_block(draw, wrapped[:2], (x1 + 40, current_y + 24), body_font, text_dark, line_gap=5)
-            current_y += 108
+            draw.rounded_rectangle((x1 + 14, y1 + 14, x1 + 28, y2 - 14), radius=6, fill=accent)
+            wrapped = self._wrap_text(draw, line, body_font, (x2 - x1) - 46)
+            self._draw_text_block(draw, wrapped[:2], (x1 + 40, y1 + 22), body_font, text_dark, line_gap=5)
 
     def _compose_comparison(self, draw, width, height, margin, copy_plan, primary, text_dark, white, heading_font, body_font):
         if not copy_plan.comparison_left and not copy_plan.comparison_right:
             return
         board = (margin, int(height * 0.58), width - margin, height - margin)
-        draw.rounded_rectangle(board, radius=26, fill=(255, 255, 255, 232))
+        draw.rounded_rectangle(board, radius=26, fill=(255, 255, 255, 234))
         x_mid = (board[0] + board[2]) // 2
         draw.line((x_mid, board[1] + 64, x_mid, board[3] - 24), fill=(214, 219, 230, 255), width=3)
         draw.text((board[0] + 28, board[1] + 20), "Our Product", font=heading_font, fill=primary)
@@ -377,17 +491,13 @@ class ImageCompositor:
     def _compose_closing(self, draw, width, height, margin, line, primary, white, heading_font):
         if not line:
             return
-        strip_h = max(110, height // 7)
-        y1 = height - strip_h - margin
-        draw.rounded_rectangle((margin, y1, width - margin, height - margin), radius=28, fill=primary)
-        lines = self._wrap_text(draw, line, heading_font, width - margin * 3)
-        line_height = draw.textbbox((0, 0), "Ag", font=heading_font)[3]
-        total_h = len(lines[:2]) * line_height + (len(lines[:2]) - 1) * 8
-        current_y = y1 + (strip_h - total_h) // 2
-        for wrapped in lines[:2]:
-            text_w = draw.textlength(wrapped, font=heading_font)
-            draw.text(((width - text_w) / 2, current_y), wrapped, font=heading_font, fill=white)
-            current_y += line_height + 8
+        title_font = self._font(max(40, width // 14), bold=True, ImageFont=self._pil_modules()[3])
+        lines = self._wrap_text(draw, line, title_font, int(width * 0.38))
+        current_y = int(height * 0.18)
+        for wrapped in lines[:3]:
+            draw.text((margin, current_y), wrapped, font=title_font, fill=white)
+            current_y = draw.textbbox((margin, current_y), wrapped, font=title_font)[3] + 10
+        draw.rounded_rectangle((margin, current_y + 18, margin + 170, current_y + 24), radius=4, fill=(255, 255, 255, 190))
 
     async def _paste_logo(self, canvas, logo_url: str, margin: int):
         Image, _, _, _ = self._pil_modules()

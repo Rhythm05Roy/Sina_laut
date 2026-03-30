@@ -292,8 +292,15 @@ class SlotPlanner:
         visual_plan: SlotVisualPlan,
         feedback: str | None,
     ) -> str:
+        if brief.slot_name == "main_product":
+            opener = f"Professional e-commerce image of {product.title} for {project.brand_name}."
+        elif brief.slot_name == "lifestyle":
+            opener = f"Professional commercial lifestyle environment for a {product.title} campaign by {project.brand_name}, without depicting the final product object."
+        else:
+            opener = f"Professional campaign background and composition for {product.title} by {project.brand_name}, without depicting product text or overlay elements."
+
         prompt_parts = [
-            f"Professional e-commerce image of {product.title} for {project.brand_name}.",
+            opener,
             f"Background: {visual_plan.background}.",
             f"Composition: {visual_plan.composition}.",
         ]
