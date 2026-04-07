@@ -238,29 +238,39 @@ def normalize_image_url(maybe_path: str) -> str:
 
 
 def _save_defaults_from_project_payload(project_id: str, project_payload: ExternalProjectPayload):
-    gen_map = {
-        "key_facts": getattr(project_payload, "image2", None),
-        "lifestyle": getattr(project_payload, "image3", None),
-        "usps": getattr(project_payload, "image4", None),
-        "comparison": getattr(project_payload, "image5", None),
-        "cross_selling": getattr(project_payload, "image6", None),
-        "closing": getattr(project_payload, "image7", None),
+    # Legacy support only: older clients may still send image2..image7 or refineImage*
+    # nested under `project`. They are no longer part of the public contract, but if
+    # present we keep non-style values as optional defaults.
+    extra = getattr(project_payload, "__pydantic_extra__", {}) or {}
+    gen_aliases = {
+        "key_facts": "image2",
+        "lifestyle": "image3",
+        "usps": "image4",
+        "comparison": "image5",
+        "cross_selling": "image6",
+        "closing": "image7",
     }
-    ref_map = {
-        "main_product": getattr(project_payload, "refine_image1", None),
-        "key_facts": getattr(project_payload, "refine_image2", None),
-        "lifestyle": getattr(project_payload, "refine_image3", None),
-        "usps": getattr(project_payload, "refine_image4", None),
-        "comparison": getattr(project_payload, "refine_image5", None),
-        "cross_selling": getattr(project_payload, "refine_image6", None),
-        "closing": getattr(project_payload, "refine_image7", None),
+    ref_aliases = {
+        "main_product": "refineImage1",
+        "key_facts": "refineImage2",
+        "lifestyle": "refineImage3",
+        "usps": "refineImage4",
+        "comparison": "refineImage5",
+        "cross_selling": "refineImage6",
+        "closing": "refineImage7",
     }
-    for slot_name, cfg in gen_map.items():
-        if cfg:
-            save_project_slot_defaults(project_id, "generate", slot_name, cfg.model_dump(exclude_none=True))
-    for slot_name, cfg in ref_map.items():
-        if cfg:
-            save_project_slot_defaults(project_id, "refine", slot_name, cfg.model_dump(exclude_none=True))
+    for slot_name, alias in gen_aliases.items():
+        cfg = extra.get(alias)
+        if isinstance(cfg, dict):
+            sanitized = {k: v for k, v in cfg.items() if k not in {"style", "style_template"} and v not in (None, "", [], {})}
+            if sanitized:
+                save_project_slot_defaults(project_id, "generate", slot_name, sanitized)
+    for slot_name, alias in ref_aliases.items():
+        cfg = extra.get(alias)
+        if isinstance(cfg, dict):
+            sanitized = {k: v for k, v in cfg.items() if k not in {"style", "style_template"} and v not in (None, "", [], {})}
+            if sanitized:
+                save_project_slot_defaults(project_id, "refine", slot_name, sanitized)
 
 
 def _strip_none(payload_dict: dict) -> dict:
@@ -272,7 +282,9 @@ def _strip_none(payload_dict: dict) -> dict:
 
 def _merge_slot_inputs(project_id: str, stage: str, slot_name: str, payload_dict: dict) -> dict:
     merged = {}
+    merged.update(get_project_slot_defaults(project_id, "generate", "__global__"))
     if stage == "refine":
+        merged.update(get_project_slot_defaults(project_id, "refine", "__global__"))
         merged.update(get_project_slot_defaults(project_id, "generate", slot_name))
     merged.update(get_project_slot_defaults(project_id, stage, slot_name))
     merged.update(_strip_none(payload_dict))
@@ -524,6 +536,8 @@ async def generate_image1(
     project_payload = _coerce_external_project(payload.project)
     if project_payload:
         _save_defaults_from_project_payload(project_id, project_payload)
+    if payload.style_template:
+        save_project_slot_defaults(project_id, "generate", "__global__", {"style_template": payload.style_template})
     image_source = payload.image_url or (project_payload.mainImage if project_payload else None) or get_asset_url(project_id, "main_raw")
     if not image_source:
         raise HTTPException(
@@ -555,7 +569,30 @@ async def generate_image1(
 # 2. Key Facts
 @router.post("/generate/key-facts", response_model=GenerationResponse, summary="2. Generate Key Facts")
 async def generate_image2(
-    payload: Optional[Image2Request] = Body(default=None),
+    payload: Optional[Image2Request] = Body(
+        default=None,
+        examples={
+            "minimal": {
+                "summary": "Use stored context from image 1",
+                "value": {}
+            },
+            "override": {
+                "summary": "Override key facts and layout",
+                "value": {
+                    "projectContext": {"projectId": "533fac36-57ff-423c-a454-6e32291684d2"},
+                    "keyFacts": [
+                        "Lightweight build",
+                        "Premium finish",
+                        "Travel friendly",
+                        "Everyday essential"
+                    ],
+                    "backgroundStyle": "Minimal",
+                    "logoPosition": "Top",
+                    "style": "modern"
+                }
+            }
+        }
+    ),
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
     payload = payload or Image2Request()
@@ -589,7 +626,24 @@ async def generate_image2(
 # 3. Lifestyle
 @router.post("/generate/lifestyle", response_model=GenerationResponse, summary="3. Generate Lifestyle")
 async def generate_image3(
-    payload: Optional[Image3Request] = Body(default=None),
+    payload: Optional[Image3Request] = Body(
+        default=None,
+        examples={
+            "minimal": {
+                "summary": "Use stored context from image 1",
+                "value": {}
+            },
+            "override": {
+                "summary": "Override scenario and optional scene reference",
+                "value": {
+                    "projectContext": {"projectId": "533fac36-57ff-423c-a454-6e32291684d2"},
+                    "scenario": "Styled in a clean premium lifestyle setting with soft daylight",
+                    "refImageUrl": "https://example.com/reference-scene.jpg",
+                    "style": "modern"
+                }
+            }
+        }
+    ),
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
     payload = payload or Image3Request()
@@ -619,7 +673,23 @@ async def generate_image3(
 # 4. USP Highlight
 @router.post("/generate/usps", response_model=GenerationResponse, summary="4. Generate USP Highlight")
 async def generate_image4(
-    payload: Optional[Image4Request] = Body(default=None),
+    payload: Optional[Image4Request] = Body(
+        default=None,
+        examples={
+            "minimal": {
+                "summary": "Use stored context from image 1",
+                "value": {}
+            },
+            "override": {
+                "summary": "Override USP callouts",
+                "value": {
+                    "projectContext": {"projectId": "533fac36-57ff-423c-a454-6e32291684d2"},
+                    "usps": ["Lightweight", "Durable", "Premium finish"],
+                    "style": "modern"
+                }
+            }
+        }
+    ),
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
     payload = payload or Image4Request()
@@ -651,7 +721,32 @@ async def generate_image4(
 # 5. Comparison
 @router.post("/generate/comparison", response_model=GenerationResponse, summary="5. Generate Comparison")
 async def generate_image5(
-    payload: Optional[Image5Request] = Body(default=None),
+    payload: Optional[Image5Request] = Body(
+        default=None,
+        examples={
+            "minimal": {
+                "summary": "Use stored context from image 1",
+                "value": {}
+            },
+            "override": {
+                "summary": "Override comparison bullets",
+                "value": {
+                    "projectContext": {"projectId": "533fac36-57ff-423c-a454-6e32291684d2"},
+                    "advantages": [
+                        "Premium material",
+                        "Refined finish",
+                        "Designed for everyday use"
+                    ],
+                    "limitations": [
+                        "Generic alternatives look basic",
+                        "Lower perceived quality",
+                        "Less polished presentation"
+                    ],
+                    "style": "modern"
+                }
+            }
+        }
+    ),
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
     payload = payload or Image5Request()
@@ -681,7 +776,39 @@ async def generate_image5(
 # 6. Cross-Selling
 @router.post("/generate/cross-selling", response_model=GenerationResponse, summary="6. Generate Cross-Selling")
 async def generate_image6(
-    payload: Optional[Image6Request] = Body(default=None),
+    payload: Optional[Image6Request] = Body(
+        default=None,
+        examples={
+            "required_products": {
+                "summary": "Cross-selling names are required in practice",
+                "value": {
+                    "projectContext": {"projectId": "533fac36-57ff-423c-a454-6e32291684d2"},
+                    "productNames": [
+                        "Travel Size",
+                        "Bundle Pack",
+                        "Premium Edition"
+                    ]
+                }
+            },
+            "with_urls": {
+                "summary": "Cross-selling names with related product URLs",
+                "value": {
+                    "projectContext": {"projectId": "533fac36-57ff-423c-a454-6e32291684d2"},
+                    "productNames": [
+                        "Travel Size",
+                        "Bundle Pack",
+                        "Premium Edition"
+                    ],
+                    "productUrls": [
+                        "https://example.com/product-a.jpg",
+                        "https://example.com/product-b.jpg",
+                        "https://example.com/product-c.jpg"
+                    ],
+                    "style": "modern"
+                }
+            }
+        }
+    ),
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
     payload = payload or Image6Request()
@@ -712,7 +839,24 @@ async def generate_image6(
 # 7. Closing
 @router.post("/generate/closing", response_model=GenerationResponse, summary="7. Generate Closing")
 async def generate_image7(
-    payload: Optional[Image7Request] = Body(default=None),
+    payload: Optional[Image7Request] = Body(
+        default=None,
+        examples={
+            "minimal": {
+                "summary": "Use stored context from image 1",
+                "value": {}
+            },
+            "override": {
+                "summary": "Override direction and headline",
+                "value": {
+                    "projectContext": {"projectId": "533fac36-57ff-423c-a454-6e32291684d2"},
+                    "direction": "Emotional",
+                    "headline": "Designed for everyday premium living",
+                    "style": "modern"
+                }
+            }
+        }
+    ),
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
     payload = payload or Image7Request()

@@ -459,6 +459,33 @@ def _build_product_dict():
     }
 
 
+def _clean_items(values):
+    return [str(v).strip() for v in (values or []) if str(v).strip()]
+
+
+def _current_step4_style() -> str:
+    return st.session_state.get("step4_style", "playful")
+
+
+def _build_step4_project_context(main_image_url: str) -> dict:
+    target_marketplace = (st.session_state.target_marketplace or "amazon").upper()
+    project = {
+        "id": st.session_state.get("project_id"),
+        "name": st.session_state.project_name or st.session_state.product_title or "Untitled Project",
+        "brandName": st.session_state.brand_name or "Brand",
+        "productCategory": st.session_state.product_category or "General",
+        "targetMarketplace": target_marketplace,
+        "status": "DRAFT",
+        "sku": st.session_state.sku or "",
+        "shortDescription": st.session_state.short_desc or "",
+        "brandFontHeading": st.session_state.font_heading,
+        "brandFontSubheading": st.session_state.font_body,
+        "mainImage": main_image_url,
+    }
+
+    return project
+
+
 # ------------------------------------------------------------------ #
 #  Generate a single slot image                                       #
 # ------------------------------------------------------------------ #
@@ -475,11 +502,8 @@ def generate_single_image(slot_key: str, extra_instructions: str = "",
         return
     project_id = st.session_state.get("project_id")
 
-    # Payload base
-    payload = {
-        "project_id": project_id,
-        "style_template": "playful", # Default or fetch from somewhere global if needed
-    }
+    payload = {}
+    style_value = _current_step4_style()
 
     # Endpoint suffix mapping
     endpoint_map = {
@@ -502,55 +526,66 @@ def generate_single_image(slot_key: str, extra_instructions: str = "",
         if not main_upload:
             st.error("Please upload main product image.")
             return
-        payload["image_url"] = to_data_url(main_upload)
+        main_image_url = to_data_url(main_upload)
+        payload["style"] = style_value
+        payload["imageUrl"] = main_image_url
+        payload["project"] = _build_step4_project_context(main_image_url)
 
     elif slot_key == "key_facts":
         facts = emphasis_items if emphasis_items else st.session_state.slot_facts.get(slot_key, [])
-        payload["key_facts"] = [f for f in facts if f.strip()]
-        payload["background_style"] = st.session_state.slot_bg_style.get(slot_key, "Minimal")
-        payload["logo_position"] = st.session_state.slot_logo_pos.get(slot_key, "Top")
+        facts = _clean_items(facts)
+        payload["projectContext"] = {"projectId": project_id}
+        if facts:
+            payload["keyFacts"] = facts
+        bg_style = st.session_state.slot_bg_style.get(slot_key, "")
+        if bg_style:
+            payload["backgroundStyle"] = bg_style
+        logo_pos = st.session_state.slot_logo_pos.get(slot_key, "")
+        if logo_pos:
+            payload["logoPosition"] = logo_pos
 
     elif slot_key == "lifestyle":
-        # extract scenario from somewhere?
-        # In UI, scenario_desc is local variable inside step_image_setup.
-        # But generate_single_image called with extra_instructions which has it?
-        # extra_instructions has "Create a lifestyle scene: {scenario_desc}..."
-        # But API expects "scenario" string.
-        # I need to extract it or pass it explicitly.
-        # Current UI implementation: extra_instructions HAS the full prompt.
-        # New API expects dedicated field.
-        # Hack: Pass scenario as argument or global session state?
-        # Better: Since specific logic is inside this function now, I need specific arguments.
-        # But signature is generic.
-        # For lifestyle, "extra_instructions" was heavily formatted.
-        # I should change the calling code to pass arguments cleaner.
-        # OR parse it back? No.
-        # I will rely on `st.session_state.lifestyle_scenario` if stored.
-        # Let's check UI call site.
-        # UI: `scenario_desc = st.text_area(..., key="lifestyle_scenario")`
-        # So I can use `st.session_state.lifestyle_scenario`.
         scenario = st.session_state.get("lifestyle_scenario", "")
-        payload["scenario"] = scenario
-        # Reference image
+        payload["projectContext"] = {"projectId": project_id}
+        if scenario.strip():
+            payload["scenario"] = scenario.strip()
         ref = st.session_state.slot_uploads.get("lifestyle")
         if ref:
-             payload["ref_image_url"] = to_data_url(ref)
+             payload["refImageUrl"] = to_data_url(ref)
 
     elif slot_key == "usps":
         usps = emphasis_items if emphasis_items else st.session_state.slot_facts.get("usps", [])
-        payload["usps"] = [u for u in usps if u.strip()]
+        usps = _clean_items(usps)
+        payload["projectContext"] = {"projectId": project_id}
+        if usps:
+            payload["usps"] = usps
 
     elif slot_key == "comparison":
-        payload["advantages"] = [a for a in st.session_state.get("advantages", []) if a.strip()]
-        payload["limitations"] = [l for l in st.session_state.get("limitations", []) if l.strip()]
+        advantages = _clean_items(st.session_state.get("advantages", []))
+        limitations = _clean_items(st.session_state.get("limitations", []))
+        payload["projectContext"] = {"projectId": project_id}
+        if advantages:
+            payload["advantages"] = advantages
+        if limitations:
+            payload["limitations"] = limitations
 
     elif slot_key == "cross_selling":
         prods = emphasis_items if emphasis_items else st.session_state.get("cross_sell_products", [])
-        payload["product_names"] = [p for p in prods if p.strip()]
+        prods = _clean_items(prods)
+        if not prods:
+            st.error("Cross-selling products are required.")
+            return
+        payload["projectContext"] = {"projectId": project_id}
+        payload["productNames"] = prods
 
     elif slot_key == "closing":
-        payload["direction"] = st.session_state.get("closing_direction", "Emotional")
-        payload["headline"] = st.session_state.get("closing_headline", "")
+        direction = st.session_state.get("closing_direction", "Emotional")
+        headline = st.session_state.get("closing_headline", "").strip()
+        payload["projectContext"] = {"projectId": project_id}
+        if direction:
+            payload["direction"] = direction
+        if headline:
+            payload["headline"] = headline
 
 
     with st.spinner(f"Generating {slot_key} image…"):
@@ -591,12 +626,11 @@ def refine_single_image(slot_key: str, feedback: str):
         return
     project_id = st.session_state.get("project_id")
 
-    # Payload base
     payload = {
-        "project_id": project_id,
-        "style_template": "playful",
         "feedback": feedback,
+        "projectContext": {"projectId": project_id},
     }
+    style_value = _current_step4_style()
 
     endpoint_map = {
         "main_product": "main-product",
@@ -616,41 +650,56 @@ def refine_single_image(slot_key: str, feedback: str):
     if slot_key == "main_product":
         main_upload = st.session_state.slot_uploads.get("main_product")
         if main_upload:
-             payload["image_url"] = to_data_url(main_upload)
-        else:
-             # If strictly required by schema but we are refining, we might not have it if session reset?
-             # But session persists.
-             st.error("Main product upload missing.")
-             return
+             payload["imageUrl"] = to_data_url(main_upload)
+        payload["style"] = style_value
 
     elif slot_key == "key_facts":
         facts = st.session_state.slot_facts.get(slot_key, [])
-        payload["key_facts"] = [f for f in facts if f.strip()]
-        payload["background_style"] = st.session_state.slot_bg_style.get(slot_key, "Minimal")
-        payload["logo_position"] = st.session_state.slot_logo_pos.get(slot_key, "Top")
+        facts = _clean_items(facts)
+        if facts:
+            payload["keyFacts"] = facts
+        bg_style = st.session_state.slot_bg_style.get(slot_key, "")
+        if bg_style:
+            payload["backgroundStyle"] = bg_style
+        logo_pos = st.session_state.slot_logo_pos.get(slot_key, "")
+        if logo_pos:
+            payload["logoPosition"] = logo_pos
 
     elif slot_key == "lifestyle":
         scenario = st.session_state.get("lifestyle_scenario", "")
-        payload["scenario"] = scenario
+        if scenario.strip():
+            payload["scenario"] = scenario.strip()
         ref = st.session_state.slot_uploads.get("lifestyle")
         if ref:
-             payload["ref_image_url"] = to_data_url(ref)
+             payload["refImageUrl"] = to_data_url(ref)
 
     elif slot_key == "usps":
         usps = st.session_state.slot_facts.get("usps", [])
-        payload["usps"] = [u for u in usps if u.strip()]
+        usps = _clean_items(usps)
+        if usps:
+            payload["usps"] = usps
 
     elif slot_key == "comparison":
-        payload["advantages"] = [a for a in st.session_state.get("advantages", []) if a.strip()]
-        payload["limitations"] = [l for l in st.session_state.get("limitations", []) if l.strip()]
+        advantages = _clean_items(st.session_state.get("advantages", []))
+        limitations = _clean_items(st.session_state.get("limitations", []))
+        if advantages:
+            payload["advantages"] = advantages
+        if limitations:
+            payload["limitations"] = limitations
 
     elif slot_key == "cross_selling":
         prods = st.session_state.get("cross_sell_products", [])
-        payload["product_names"] = [p for p in prods if p.strip()]
+        prods = _clean_items(prods)
+        if prods:
+            payload["productNames"] = prods
 
     elif slot_key == "closing":
-        payload["direction"] = st.session_state.get("closing_direction", "Emotional")
-        payload["headline"] = st.session_state.get("closing_headline", "")
+        direction = st.session_state.get("closing_direction", "Emotional")
+        headline = st.session_state.get("closing_headline", "").strip()
+        if direction:
+            payload["direction"] = direction
+        if headline:
+            payload["headline"] = headline
 
 
     with st.spinner(f"Refining {slot_key} image…"):
@@ -930,6 +979,7 @@ def step_image_setup():
             active = 0
 
         slot_key, slot_label, slot_icon = SLOTS[active]
+        has_main_context = "main_product" in st.session_state.generated_images
 
         # ========================== IMAGE 1: MAIN PRODUCT ==========================
         if slot_key == "main_product":
@@ -975,9 +1025,9 @@ def step_image_setup():
         # ========================== IMAGE 2: KEY FACTS ==========================
         elif slot_key == "key_facts":
             st.markdown("### Image 2 – Product with Key Facts")
-            st.caption("Uses Image 1 as context + your key facts to generate an infographic.")
+            st.caption("Uses Image 1 as context. Add key facts only if you want to override the AI-generated defaults.")
 
-            if "main_product" not in st.session_state.generated_images:
+            if not has_main_context:
                 st.warning("⚠️ Please generate Image 1 (Main Product) first — it is used as context for this image.")
 
             st.session_state.slot_bg_style[slot_key] = st.selectbox(
@@ -991,7 +1041,7 @@ def step_image_setup():
                 key="logo_pos_kf",
             )
 
-            st.markdown("**4 Key Product Facts**")
+            st.markdown("**Optional Key Product Facts Override**")
             facts = st.session_state.slot_facts.get(slot_key, ["", "", "", ""])
             new_facts = []
             for fi in range(4):
@@ -1002,9 +1052,8 @@ def step_image_setup():
                 new_facts.append(val)
             st.session_state.slot_facts[slot_key] = new_facts
 
-            has_facts = any(f.strip() for f in new_facts)
             if st.button("🚀 Generate Key Facts Image", key="gen_kf", type="primary",
-                         disabled=not has_facts):
+                         disabled=not has_main_context):
                 facts_text = "; ".join(f for f in new_facts if f.strip())
                 generate_single_image(
                     "key_facts",
@@ -1023,10 +1072,13 @@ def step_image_setup():
         # ========================== IMAGE 3: LIFESTYLE ==========================
         elif slot_key == "lifestyle":
             st.markdown("### Image 3 – Lifestyle Scene")
-            st.caption("Upload an additional reference image and describe the scenario.")
+            st.caption("Uses Image 1 as context. Scenario and reference image are optional overrides.")
+
+            if not has_main_context:
+                st.warning("⚠️ Please generate Image 1 (Main Product) first — it is used as context for this image.")
 
             lifestyle_upload = st.file_uploader(
-                "Upload additional reference image", type=["png", "jpg", "jpeg"],
+                "Upload additional reference image (optional)", type=["png", "jpg", "jpeg"],
                 key="upload_lifestyle",
             )
             if lifestyle_upload:
@@ -1034,14 +1086,14 @@ def step_image_setup():
                 st.image(lifestyle_upload, caption="Reference image", width=300)
 
             scenario_desc = st.text_area(
-                "Scenario Description *",
+                "Scenario Description (optional)",
                 placeholder="e.g., A child playing with the product in a bright living room with natural sunlight...",
                 key="lifestyle_scenario",
                 height=100,
             )
 
             if st.button("🚀 Generate Lifestyle Image", key="gen_lifestyle", type="primary",
-                         disabled=not scenario_desc):
+                         disabled=not has_main_context):
                 extra_uploads = [lifestyle_upload] if lifestyle_upload else None
                 generate_single_image(
                     "lifestyle",
@@ -1059,9 +1111,12 @@ def step_image_setup():
         # ========================== IMAGE 4: USP HIGHLIGHT ==========================
         elif slot_key == "usps":
             st.markdown(f"### Image {active+1} – USP Highlight Image")
-            st.caption("Visual representation of unique selling points")
+            st.caption("Uses Image 1 as context. USP inputs are optional overrides.")
 
-            st.markdown("**USP Highlights with Icons**")
+            if not has_main_context:
+                st.warning("⚠️ Please generate Image 1 (Main Product) first — it is used as context for this image.")
+
+            st.markdown("**Optional USP Overrides**")
             usp_items = st.session_state.slot_facts.get("usps", ["", "", "", ""])
             if len(usp_items) < 4:
                 usp_items = usp_items + [""] * (4 - len(usp_items))
@@ -1077,8 +1132,6 @@ def step_image_setup():
                 new_usps.append(val)
             st.session_state.slot_facts["usps"] = new_usps
 
-            has_usps = any(u.strip() for u in new_usps)
-
             # Preview placeholder
             if "usps" not in st.session_state.generated_images:
                 st.markdown("""
@@ -1087,7 +1140,7 @@ def step_image_setup():
                 </div>
                 """, unsafe_allow_html=True)
 
-            if st.button("🚀 Generate Images", key="gen_usp", type="primary", disabled=not has_usps):
+            if st.button("🚀 Generate Images", key="gen_usp", type="primary", disabled=not has_main_context):
                 usp_text = "; ".join(u for u in new_usps if u.strip())
                 generate_single_image(
                     "usps",
@@ -1107,7 +1160,10 @@ def step_image_setup():
         # ========================== IMAGE 5: COMPARISON ==========================
         elif slot_key == "comparison":
             st.markdown(f"### Image {active+1} – Comparison Image")
-            st.caption("Us vs Other Products comparison")
+            st.caption("Uses Image 1 as context. Advantages and limitations are optional overrides.")
+
+            if not has_main_context:
+                st.warning("⚠️ Please generate Image 1 (Main Product) first — it is used as context for this image.")
 
             # Initialize comparison data
             if "advantages" not in st.session_state:
@@ -1138,8 +1194,6 @@ def step_image_setup():
                     new_lims.append(val)
                 st.session_state.limitations = new_lims
 
-            has_comp = any(a.strip() for a in new_advs) or any(l.strip() for l in new_lims)
-
             # Preview placeholder
             if "comparison" not in st.session_state.generated_images:
                 st.markdown("""
@@ -1148,7 +1202,7 @@ def step_image_setup():
                 </div>
                 """, unsafe_allow_html=True)
 
-            if st.button("🚀 Generate Images", key="gen_comp", type="primary", disabled=not has_comp):
+            if st.button("🚀 Generate Images", key="gen_comp", type="primary", disabled=not has_main_context):
                 adv_text = "; ".join(f"✓ {a}" for a in new_advs if a.strip())
                 lim_text = "; ".join(f"✗ {l}" for l in new_lims if l.strip())
                 all_items = [f"ADV:{a}" for a in new_advs if a.strip()] + [f"LIM:{l}" for l in new_lims if l.strip()]
@@ -1171,7 +1225,10 @@ def step_image_setup():
         # ========================== IMAGE 6: CROSS-SELLING ==========================
         elif slot_key == "cross_selling":
             st.markdown(f"### Image {active+1} – Cross-Selling Image")
-            st.caption("Showcase related products for cross-selling")
+            st.caption("Uses Image 1 as context. Cross-selling product names are required here.")
+
+            if not has_main_context:
+                st.warning("⚠️ Please generate Image 1 (Main Product) first — it is used as context for this image.")
 
             st.markdown("**Select Cross-Sell Products**")
 
@@ -1221,7 +1278,7 @@ def step_image_setup():
                 </div>
                 """, unsafe_allow_html=True)
 
-            if st.button("🚀 Generate Images", key="gen_cs", type="primary", disabled=not has_cs):
+            if st.button("🚀 Generate Images", key="gen_cs", type="primary", disabled=(not has_main_context or not has_cs)):
                 product_names = [p for p in new_cs if p.strip()]
                 names_text = ", ".join(product_names)
                 generate_single_image(
@@ -1243,7 +1300,10 @@ def step_image_setup():
         # ========================== IMAGE 7: CLOSING ==========================
         elif slot_key == "closing":
             st.markdown(f"### Image {active+1} – Closing / Emotional Image")
-            st.caption("Final message to inspire action")
+            st.caption("Uses Image 1 as context. Direction and headline are optional overrides.")
+
+            if not has_main_context:
+                st.warning("⚠️ Please generate Image 1 (Main Product) first — it is used as context for this image.")
 
             # Direction selection
             st.markdown("**Direction Selection**")
@@ -1289,7 +1349,7 @@ def step_image_setup():
                 </div>
                 """, unsafe_allow_html=True)
 
-            if st.button("🚀 Generate Images", key="gen_cl", type="primary"):
+            if st.button("🚀 Generate Images", key="gen_cl", type="primary", disabled=not has_main_context):
                 direction = st.session_state.closing_direction
                 headline = st.session_state.closing_headline.strip()
                 headline_instruction = f'Render this EXACT headline: "{headline}"' if headline else "No headline text — create a purely visual composition."

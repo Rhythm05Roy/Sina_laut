@@ -1,7 +1,7 @@
 """
 Request schemas for Step 4 individual image generation routes.
 """
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, AliasChoices
 from typing import Any, Dict, List, Optional, Literal
 
 
@@ -37,6 +37,7 @@ class ComparisonConfig(Step4Schema):
 class CrossSellingConfig(Step4Schema):
     style_template: Optional[str] = Field(None, alias="style")
     product_names: Optional[List[str]] = Field(None, alias="productNames", min_length=1, max_length=6)
+    product_urls: Optional[List[str]] = Field(None, alias="productUrls", min_length=1, max_length=6)
 
 
 class ClosingConfig(Step4Schema):
@@ -76,7 +77,11 @@ class ClosingRefineConfig(ClosingConfig):
 
 
 class ExternalProjectPayload(Step4Schema):
-    project_id: Optional[str] = Field(None, alias="projectId")
+    project_id: Optional[str] = Field(
+        None,
+        alias="id",
+        validation_alias=AliasChoices("id", "projectId"),
+    )
     name: Optional[str] = None
     brandName: Optional[str] = None
     productCategory: Optional[str] = None
@@ -92,19 +97,6 @@ class ExternalProjectPayload(Step4Schema):
     updatedAt: Optional[str] = None
     imagesCreated: Optional[int] = None
     productsOptimized: Optional[int] = None
-    image2: Optional[KeyFactsConfig] = Field(None, description="Optional defaults for key-facts generation")
-    image3: Optional[LifestyleConfig] = Field(None, description="Optional defaults for lifestyle generation")
-    image4: Optional[UspsConfig] = Field(None, description="Optional defaults for USP generation")
-    image5: Optional[ComparisonConfig] = Field(None, description="Optional defaults for comparison generation")
-    image6: Optional[CrossSellingConfig] = Field(None, description="Optional defaults for cross-selling generation")
-    image7: Optional[ClosingConfig] = Field(None, description="Optional defaults for closing generation")
-    refine_image1: Optional[MainRefineConfig] = Field(None, alias="refineImage1", description="Optional defaults for main-product refinement")
-    refine_image2: Optional[KeyFactsRefineConfig] = Field(None, alias="refineImage2", description="Optional defaults for key-facts refinement")
-    refine_image3: Optional[LifestyleRefineConfig] = Field(None, alias="refineImage3", description="Optional defaults for lifestyle refinement")
-    refine_image4: Optional[UspsRefineConfig] = Field(None, alias="refineImage4", description="Optional defaults for USP refinement")
-    refine_image5: Optional[ComparisonRefineConfig] = Field(None, alias="refineImage5", description="Optional defaults for comparison refinement")
-    refine_image6: Optional[CrossSellingRefineConfig] = Field(None, alias="refineImage6", description="Optional defaults for cross-selling refinement")
-    refine_image7: Optional[ClosingRefineConfig] = Field(None, alias="refineImage7", description="Optional defaults for closing refinement")
 
 
 class BaseStep4Request(Step4Schema):
@@ -112,7 +104,7 @@ class BaseStep4Request(Step4Schema):
 
 
 class ProjectRequestBase(BaseStep4Request):
-    project: Optional[Dict[str, Any]] = None
+    project: Optional[ExternalProjectPayload] = None
 
 
 class ProjectContextRequestBase(BaseStep4Request):
@@ -123,14 +115,14 @@ class Image1Request(ProjectRequestBase):
     image_url: Optional[str] = Field(None, alias="imageUrl")
 
 
-class Image2Request(ProjectRequestBase):
+class Image2Request(ProjectContextRequestBase):
     key_facts: Optional[List[str]] = Field(None, alias="keyFacts", min_length=1, max_length=4)
     background_style: Optional[str] = Field(None, alias="backgroundStyle")
     logo_position: Optional[str] = Field(None, alias="logoPosition")
     image_url: Optional[str] = Field(None, alias="imageUrl")
 
 
-class Image3Request(ProjectRequestBase):
+class Image3Request(ProjectContextRequestBase):
     scenario: Optional[str] = None
     ref_image_url: Optional[str] = Field(None, alias="refImageUrl")
 
@@ -146,6 +138,7 @@ class Image5Request(ProjectContextRequestBase):
 
 class Image6Request(ProjectContextRequestBase):
     product_names: Optional[List[str]] = Field(None, alias="productNames", min_length=1, max_length=6)
+    product_urls: Optional[List[str]] = Field(None, alias="productUrls", min_length=1, max_length=6)
 
 
 class Image7Request(ProjectContextRequestBase):
@@ -184,6 +177,7 @@ class Image5RefineRequest(RefineBaseRequest):
 
 class Image6RefineRequest(RefineBaseRequest):
     product_names: Optional[List[str]] = Field(None, alias="productNames", min_length=1, max_length=6)
+    product_urls: Optional[List[str]] = Field(None, alias="productUrls", min_length=1, max_length=6)
 
 
 class Image7RefineRequest(RefineBaseRequest):
