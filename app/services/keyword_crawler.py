@@ -4,7 +4,6 @@ from typing import Dict, List, Optional, Tuple
 
 from app.core.config import get_settings
 from app.schemas.product import ProductInfo
-from app.services.dataforseo_client import DataForSEOClient
 from app.services.gemini_text_client import GeminiTextClient
 from app.services.pipeline_models import KeywordPlan
 
@@ -104,8 +103,7 @@ async def crawl_keywords(
     analysis: Optional[Dict] = None,
 ) -> KeywordPlan:
     """
-    Keyword discovery + scoring with Gemini keyword selection, optional DataForSEO enrichment,
-    and deterministic fallback.
+    Keyword discovery + scoring with Gemini keyword selection and deterministic fallback.
     """
     cache_key = (
         (product.title or "").lower(),
@@ -150,12 +148,7 @@ async def crawl_keywords(
             raw_candidates.append(' '.join(parts[:2]))
             raw_candidates.append(' '.join(parts[:3]) if len(parts) >= 3 else ' '.join(parts[:2]))
 
-    settings = get_settings()
-    dataforseo = DataForSEOClient(settings)
-    dfs_results = await dataforseo.fetch_keywords(raw_candidates, marketplace=marketplace)
-    dfs_keywords = [item.get('keyword', '') for item in dfs_results if isinstance(item, dict) and item.get('keyword')]
-
-    merged_candidates = raw_candidates + dfs_keywords
+    merged_candidates = raw_candidates
 
     usp_norm = {u.lower() for u in usps}
     seen = set()
@@ -212,27 +205,27 @@ async def crawl_keywords(
     gemini_secondary = _clean_list(gemini_result.get('secondary', []), [], 0, 8)
     gemini_visual = _clean_list(gemini_result.get('clean_visual', []), [], 0, 8)
 
-    dfs_primary = _clean_list([], fallback_primary, 3, 5) if dfs_keywords else []
-    dfs_secondary = _clean_list([], fallback_secondary, 5, 8) if dfs_keywords else []
-    dfs_visual = _clean_list([], fallback_clean_visual, 4, 8) if dfs_keywords else []
+    fallback_primary_clean = _clean_list([], fallback_primary, 3, 5)
+    fallback_secondary_clean = _clean_list([], fallback_secondary, 5, 8)
+    fallback_visual_clean = _clean_list([], fallback_clean_visual, 4, 8)
 
     if gemini_primary or gemini_visual:
         result = KeywordPlan(
             available=True,
             source="gemini",
-            primary=gemini_primary or dfs_primary,
-            secondary=gemini_secondary or dfs_secondary,
-            clean_visual=gemini_visual or dfs_visual,
-            warning=None if gemini_result else "Gemini keyword result was partial; supplemented with deterministic cleanup.",
+            primary=gemini_primary or fallback_primary_clean,
+            secondary=gemini_secondary or fallback_secondary_clean,
+            clean_visual=gemini_visual or fallback_visual_clean,
+            warning=None if gemini_result else "Gemini keyword result was partial; supplemented with deterministic fallback.",
         )
-    elif dfs_visual or dfs_primary:
+    elif fallback_visual_clean or fallback_primary_clean:
         result = KeywordPlan(
             available=True,
-            source="dataforseo",
-            primary=dfs_primary,
-            secondary=dfs_secondary,
-            clean_visual=dfs_visual,
-            warning="Gemini keywords unavailable. Using DataForSEO-only keyword plan.",
+            source="fallback",
+            primary=fallback_primary_clean,
+            secondary=fallback_secondary_clean,
+            clean_visual=fallback_visual_clean,
+            warning="Gemini keywords unavailable. Using deterministic keyword fallback.",
         )
     else:
         result = KeywordPlan(

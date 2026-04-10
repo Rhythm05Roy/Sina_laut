@@ -9,7 +9,6 @@ class ProviderHealth(BaseModel):
     openai_image_ready: bool = False
     openai_analysis_ready: bool = False
     gemini_keywords_ready: bool = False
-    dataforseo_enabled: bool = False
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -27,7 +26,7 @@ class ProductAnalysis(BaseModel):
 
 class KeywordPlan(BaseModel):
     available: bool = False
-    source: Literal["gemini", "dataforseo", "fallback", "none"] = "none"
+    source: Literal["gemini", "fallback", "none"] = "none"
     primary: list[str] = Field(default_factory=list)
     secondary: list[str] = Field(default_factory=list)
     clean_visual: list[str] = Field(default_factory=list)

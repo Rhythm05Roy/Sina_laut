@@ -148,7 +148,6 @@ class ImageGenerationService:
             openai_image_ready=bool(self.settings.openai_api_key),
             openai_analysis_ready=bool(self.settings.openai_api_key),
             gemini_keywords_ready=keyword_plan.source == "gemini" and keyword_plan.available,
-            dataforseo_enabled=bool(self.settings.dataforseo_login and self.settings.dataforseo_password),
             warnings=list(warnings),
         )
 
