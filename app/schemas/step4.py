@@ -115,33 +115,33 @@ class Image1Request(ProjectRequestBase):
     image_url: Optional[str] = Field(None, alias="imageUrl")
 
 
-class Image2Request(ProjectContextRequestBase):
+class Image2Request(BaseStep4Request):
     key_facts: Optional[List[str]] = Field(None, alias="keyFacts", min_length=1, max_length=4)
     background_style: Optional[str] = Field(None, alias="backgroundStyle")
     logo_position: Optional[str] = Field(None, alias="logoPosition")
     image_url: Optional[str] = Field(None, alias="imageUrl")
 
 
-class Image3Request(ProjectContextRequestBase):
+class Image3Request(BaseStep4Request):
     scenario: Optional[str] = None
     ref_image_url: Optional[str] = Field(None, alias="refImageUrl")
 
 
-class Image4Request(ProjectContextRequestBase):
+class Image4Request(BaseStep4Request):
     usps: Optional[List[str]] = Field(None, min_length=1, max_length=4)
 
 
-class Image5Request(ProjectContextRequestBase):
+class Image5Request(BaseStep4Request):
     advantages: Optional[List[str]] = None
     limitations: Optional[List[str]] = None
 
 
-class Image6Request(ProjectContextRequestBase):
+class Image6Request(BaseStep4Request):
     product_names: Optional[List[str]] = Field(None, alias="productNames", min_length=1, max_length=6)
     product_urls: Optional[List[str]] = Field(None, alias="productUrls", min_length=1, max_length=6)
 
 
-class Image7Request(ProjectContextRequestBase):
+class Image7Request(BaseStep4Request):
     direction: Optional[str] = None
     headline: Optional[str] = None
 

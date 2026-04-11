@@ -579,7 +579,6 @@ async def generate_image2(
             "override": {
                 "summary": "Override key facts and layout",
                 "value": {
-                    "projectContext": {"projectId": "533fac36-57ff-423c-a454-6e32291684d2"},
                     "keyFacts": [
                         "Lightweight build",
                         "Premium finish",
@@ -596,7 +595,7 @@ async def generate_image2(
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
     payload = payload or Image2Request()
-    project_id, context_id = _resolve_project_and_context(payload)
+    project_id, context_id = _resolve_latest_project_and_context()
     merged = _merge_slot_inputs(project_id, "generate", "key_facts", _payload_overrides(payload))
     assets = []
     img1 = merged.get("image_url") or get_generated_image_url(project_id, "main_product") or get_asset_url(project_id, "main_raw")
@@ -636,7 +635,6 @@ async def generate_image3(
             "override": {
                 "summary": "Override scenario and optional scene reference",
                 "value": {
-                    "projectContext": {"projectId": "533fac36-57ff-423c-a454-6e32291684d2"},
                     "scenario": "Styled in a clean premium lifestyle setting with soft daylight",
                     "refImageUrl": "https://example.com/reference-scene.jpg",
                     "style": "modern"
@@ -647,7 +645,7 @@ async def generate_image3(
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
     payload = payload or Image3Request()
-    project_id, context_id = _resolve_project_and_context(payload)
+    project_id, context_id = _resolve_latest_project_and_context()
     merged = _merge_slot_inputs(project_id, "generate", "lifestyle", _payload_overrides(payload))
     assets = []
     img1 = get_generated_image_url(project_id, "main_product")
@@ -683,7 +681,6 @@ async def generate_image4(
             "override": {
                 "summary": "Override USP callouts",
                 "value": {
-                    "projectContext": {"projectId": "533fac36-57ff-423c-a454-6e32291684d2"},
                     "usps": ["Lightweight", "Durable", "Premium finish"],
                     "style": "modern"
                 }
@@ -693,7 +690,7 @@ async def generate_image4(
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
     payload = payload or Image4Request()
-    project_id, context_id = _resolve_project_and_context(payload)
+    project_id, context_id = _resolve_latest_project_and_context()
     merged = _merge_slot_inputs(project_id, "generate", "usps", _payload_overrides(payload))
     assets = []
     img1 = get_generated_image_url(project_id, "main_product")
@@ -731,7 +728,6 @@ async def generate_image5(
             "override": {
                 "summary": "Override comparison bullets",
                 "value": {
-                    "projectContext": {"projectId": "533fac36-57ff-423c-a454-6e32291684d2"},
                     "advantages": [
                         "Premium material",
                         "Refined finish",
@@ -750,7 +746,7 @@ async def generate_image5(
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
     payload = payload or Image5Request()
-    project_id, context_id = _resolve_project_and_context(payload)
+    project_id, context_id = _resolve_latest_project_and_context()
     merged = _merge_slot_inputs(project_id, "generate", "comparison", _payload_overrides(payload))
     assets = []
     img1 = get_generated_image_url(project_id, "main_product")
@@ -782,7 +778,6 @@ async def generate_image6(
             "required_products": {
                 "summary": "Cross-selling names are required in practice",
                 "value": {
-                    "projectContext": {"projectId": "533fac36-57ff-423c-a454-6e32291684d2"},
                     "productNames": [
                         "Travel Size",
                         "Bundle Pack",
@@ -793,7 +788,6 @@ async def generate_image6(
             "with_urls": {
                 "summary": "Cross-selling names with related product URLs",
                 "value": {
-                    "projectContext": {"projectId": "533fac36-57ff-423c-a454-6e32291684d2"},
                     "productNames": [
                         "Travel Size",
                         "Bundle Pack",
@@ -812,7 +806,7 @@ async def generate_image6(
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
     payload = payload or Image6Request()
-    project_id, context_id = _resolve_project_and_context(payload)
+    project_id, context_id = _resolve_latest_project_and_context()
     merged = _merge_slot_inputs(project_id, "generate", "cross_selling", _payload_overrides(payload))
     assets = []
     img1 = get_generated_image_url(project_id, "main_product")
@@ -821,7 +815,7 @@ async def generate_image6(
     raw_main = get_asset_url(project_id, "main_raw")
     if raw_main:
         assets.append(Asset(type="source_photo", url=normalize_image_url(raw_main)))
-    for product_url in merged.get("productUrls", [])[:6]:
+    for product_url in merged.get("product_urls", [])[:6]:
         if product_url:
             assets.append(Asset(type="related_product", url=normalize_image_url(product_url)))
 
@@ -849,7 +843,6 @@ async def generate_image7(
             "override": {
                 "summary": "Override direction and headline",
                 "value": {
-                    "projectContext": {"projectId": "533fac36-57ff-423c-a454-6e32291684d2"},
                     "direction": "Emotional",
                     "headline": "Designed for everyday premium living",
                     "style": "modern"
@@ -860,7 +853,7 @@ async def generate_image7(
     generator: ImageGenerationService = Depends(get_image_generation_service)
 ):
     payload = payload or Image7Request()
-    project_id, context_id = _resolve_project_and_context(payload)
+    project_id, context_id = _resolve_latest_project_and_context()
     merged = _merge_slot_inputs(project_id, "generate", "closing", _payload_overrides(payload))
     assets = []
     img1 = get_generated_image_url(project_id, "main_product")
