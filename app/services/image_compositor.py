@@ -99,7 +99,7 @@ class ImageCompositor:
                 canvas,
                 hero_image_url=hero_image_url,
                 raw_product_url=raw_product_url,
-                box=(int(width * 0.18), int(height * 0.18), int(width * 0.56), int(height * 0.86)),
+                box=(int(width * 0.12), int(height * 0.24), int(width * 0.42), int(height * 0.78)),
             )
             self._compose_lifestyle(draw, width, height, margin, slot_plan.copy_plan.callouts[:3], primary, text_dark, white, body_font, small_font)
         elif slot == "usps":
@@ -379,66 +379,110 @@ class ImageCompositor:
     def _compose_key_facts(self, draw, width, height, margin, callouts, primary, secondary, text_dark, white, heading_font, body_font):
         if not callouts:
             return
-        eyebrow_font = self._font(max(15, width // 62), bold=False, ImageFont=self._pil_modules()[3])
-        card_font = self._font(max(26, width // 28), bold=True, ImageFont=self._pil_modules()[3])
-        draw.text((margin, margin), "MARKETPLACE HIGHLIGHTS", font=eyebrow_font, fill=(*primary[:3], 182))
-        draw.text((margin, margin + 24), "Key facts", font=heading_font, fill=text_dark)
+        image_font = self._pil_modules()[3]
+        eyebrow_font = self._font(max(14, width // 68), bold=False, ImageFont=image_font)
+        sub_font = self._font(max(16, width // 52), bold=False, ImageFont=image_font)
+        card_font = self._font(max(18, width // 40), bold=True, ImageFont=image_font)
+        draw.text((margin, margin), "PRODUCT HIGHLIGHTS", font=eyebrow_font, fill=(*primary[:3], 178))
+        draw.text((margin, margin + 22), "Key Facts", font=heading_font, fill=text_dark)
+        draw.text(
+            (margin, margin + 62),
+            "Fast-scanning feature snapshot for marketplace shoppers.",
+            font=sub_font,
+            fill=(92, 102, 122, 255),
+        )
 
         region_x1 = int(width * 0.57)
-        region_y1 = int(height * 0.15)
+        region_y1 = int(height * 0.18)
         card_w = width - region_x1 - margin
         card_gap = 18
-        card_h = max(120, int((height - region_y1 - margin - card_gap * 3) / 4))
-        for idx, text in enumerate(callouts[:4]):
+        card_count = max(1, min(4, len(callouts)))
+        available_h = height - region_y1 - margin - card_gap * (card_count - 1)
+        card_h = max(108, int(available_h / card_count))
+        for idx, text in enumerate(callouts[:card_count]):
             y1 = region_y1 + idx * (card_h + card_gap)
             y2 = y1 + card_h
             box = (region_x1, y1, region_x1 + card_w, y2)
             fill = (255, 255, 255, 246)
-            shadow = (33, 42, 58, 16)
+            shadow = (33, 42, 58, 18)
             self._draw_card(draw, box, fill, shadow, radius=24)
-            draw.rounded_rectangle(box, radius=24, outline=(224, 228, 238, 255), width=2)
+            draw.rounded_rectangle(box, radius=24, outline=(226, 231, 240, 255), width=2)
 
             accent = primary if idx % 2 == 0 else secondary
-            draw.rounded_rectangle((region_x1 + 20, y1 + 20, region_x1 + 26, y2 - 20), radius=4, fill=accent)
-            tag = f"{idx + 1:02d}"
-            draw.text((region_x1 + 42, y1 + 18), tag, font=eyebrow_font, fill=(*primary[:3], 160))
-            lines = self._wrap_text(draw, text, card_font, card_w - 76)
-            self._draw_text_block(draw, lines[:2], (region_x1 + 42, y1 + 42), card_font, text_dark, line_gap=4)
+            draw.rounded_rectangle((region_x1 + 22, y1 + 22, region_x1 + 30, y2 - 22), radius=4, fill=accent)
+            tag = f"0{idx + 1}" if idx < 9 else str(idx + 1)
+            draw.text((region_x1 + 48, y1 + 20), tag, font=eyebrow_font, fill=(100, 110, 132, 255))
+            lines = self._wrap_text(draw, text, card_font, card_w - 92)
+            self._draw_text_block(draw, lines[:3], (region_x1 + 48, y1 + 46), card_font, text_dark, line_gap=6)
 
     def _compose_lifestyle(self, draw, width, height, margin, callouts, primary, text_dark, white, body_font, small_font):
         if not callouts:
             return
-        strip_h = max(144, height // 5)
-        y1 = height - strip_h - margin
-        overlay = (255, 255, 255, 224)
-        draw.rounded_rectangle((margin, y1, width - margin, height - margin), radius=28, fill=overlay)
-        title = "Everyday Performance"
-        draw.text((margin + 20, y1 + 16), title, font=body_font, fill=text_dark)
-        for idx, line in enumerate(callouts[:3]):
-            bullet_y = y1 + 58 + idx * 30
-            draw.text((margin + 24, bullet_y), f"- {line}", font=small_font, fill=primary)
+        image_font = self._pil_modules()[3]
+        eyebrow_font = self._font(max(13, width // 78), bold=False, ImageFont=image_font)
+        title_font = self._font(max(24, width // 34), bold=True, ImageFont=image_font)
+        panel_x1 = margin
+        panel_x2 = int(width * 0.74)
+        panel_y2 = height - margin
+        panel_y1 = panel_y2 - max(150, height // 5)
+        draw.rounded_rectangle((panel_x1, panel_y1, panel_x2, panel_y2), radius=30, fill=(255, 255, 255, 214))
+        draw.text((panel_x1 + 22, panel_y1 + 18), "REAL-WORLD USE", font=eyebrow_font, fill=(*primary[:3], 176))
+        draw.text((panel_x1 + 22, panel_y1 + 42), callouts[0], font=title_font, fill=text_dark)
+
+        chip_x = panel_x1 + 22
+        chip_y = panel_y1 + 94
+        chip_gap = 12
+        for line in callouts[1:3]:
+            text_w = int(draw.textlength(line, font=small_font))
+            chip_w = min(panel_x2 - panel_x1 - 44, text_w + 34)
+            chip_h = 34
+            draw.rounded_rectangle(
+                (chip_x, chip_y, chip_x + chip_w, chip_y + chip_h),
+                radius=16,
+                fill=(255, 255, 255, 228),
+                outline=(226, 231, 240, 255),
+                width=2,
+            )
+            draw.text((chip_x + 16, chip_y + 8), line, font=small_font, fill=text_dark)
+            chip_x += chip_w + chip_gap
 
     def _compose_usps(self, draw, width, height, margin, copy_plan, primary, secondary, text_dark, white, heading_font, body_font):
+        if not copy_plan.callouts and not copy_plan.headline:
+            return
+        image_font = self._pil_modules()[3]
+        eyebrow_font = self._font(max(14, width // 68), bold=False, ImageFont=image_font)
+        card_font = self._font(max(17, width // 48), bold=True, ImageFont=image_font)
         positions = [
-            (margin, int(height * 0.16), int(width * 0.27), int(height * 0.30)),
-            (int(width * 0.71), int(height * 0.16), width - margin, int(height * 0.30)),
-            (margin, int(height * 0.58), int(width * 0.27), int(height * 0.72)),
-            (int(width * 0.71), int(height * 0.58), width - margin, int(height * 0.72)),
+            (margin, int(height * 0.18), int(width * 0.30), int(height * 0.32)),
+            (int(width * 0.70), int(height * 0.18), width - margin, int(height * 0.32)),
+            (margin, int(height * 0.60), int(width * 0.30), int(height * 0.74)),
+            (int(width * 0.70), int(height * 0.60), width - margin, int(height * 0.74)),
         ]
+        draw.text((margin, margin), "WHY IT STANDS OUT", font=eyebrow_font, fill=(*primary[:3], 182))
         if copy_plan.headline:
             lines = self._wrap_text(draw, copy_plan.headline, heading_font, width - margin * 2)
-            self._draw_text_block(draw, lines[:2], (margin, margin), heading_font, text_dark, line_gap=4)
-        callout_y_shift = 0 if not copy_plan.headline else 38
+            self._draw_text_block(draw, lines[:2], (margin, margin + 22), heading_font, text_dark, line_gap=4)
+        target_x = width // 2
+        target_y = int(height * 0.49)
+        callout_y_shift = 0 if not copy_plan.headline else 44
         for idx, line in enumerate(copy_plan.callouts[:4]):
             x1, y1, x2, y2 = positions[idx]
             y1 += callout_y_shift
             y2 += callout_y_shift
             box = (x1, y1, x2, y2)
+            accent = primary if idx % 2 == 0 else secondary
+            if x1 < target_x:
+                start = (x2, (y1 + y2) // 2)
+            else:
+                start = (x1, (y1 + y2) // 2)
+            draw.line((start[0], start[1], target_x, target_y), fill=accent, width=3)
             self._draw_card(draw, box, (255, 255, 255, 240), (48, 56, 72, 18), radius=22)
             accent = primary if idx % 2 == 0 else secondary
             draw.rounded_rectangle((x1 + 14, y1 + 14, x1 + 28, y2 - 14), radius=6, fill=accent)
-            wrapped = self._wrap_text(draw, line, body_font, (x2 - x1) - 46)
-            self._draw_text_block(draw, wrapped[:2], (x1 + 40, y1 + 22), body_font, text_dark, line_gap=5)
+            tag = f"0{idx + 1}" if idx < 9 else str(idx + 1)
+            draw.text((x1 + 40, y1 + 16), tag, font=eyebrow_font, fill=(100, 110, 132, 255))
+            wrapped = self._wrap_text(draw, line, card_font, (x2 - x1) - 52)
+            self._draw_text_block(draw, wrapped[:2], (x1 + 40, y1 + 40), card_font, text_dark, line_gap=5)
 
     def _compose_comparison(self, draw, width, height, margin, copy_plan, primary, text_dark, white, heading_font, body_font):
         if not copy_plan.comparison_left and not copy_plan.comparison_right:

@@ -216,11 +216,9 @@ class ImageGenerationService:
                             input_images=[source_image],
                         )
                     except Exception as exc:
-                        warnings.append(f"Main image AI cleanup failed; used deterministic fallback. {exc}")
-                        final_image_url = await self.image_compositor.compose_main_product(
-                            source_image,
-                            canvas_size=(1024, 1024),
-                        )
+                        raise RuntimeError(
+                            f"Main product GPT background cleanup failed: {exc}"
+                        ) from exc
                 else:
                     generated_image_url = None
                     if brief.slot_name == "lifestyle":

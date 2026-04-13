@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Iterable
 
 from app.core.config import Settings
@@ -20,6 +21,22 @@ from app.services.pipeline_models import (
 
 
 INTENT_TERMS = {"buy", "best", "price", "deal", "offer", "cheap", "discount"}
+GENERIC_COPY_BAN = {
+    "centered product",
+    "product left",
+    "product right",
+    "white background",
+    "clean background",
+    "marketplace ready",
+    "marketplace-ready",
+    "hero product",
+    "product image",
+    "main product",
+}
+STOPWORDS = {
+    "a", "an", "and", "as", "at", "by", "for", "from", "in", "is", "it", "of",
+    "on", "or", "the", "this", "that", "to", "with", "your",
+}
 
 
 class SlotPlanner:
@@ -95,6 +112,131 @@ class SlotPlanner:
         ]
         return self._clean_items(filtered, limit)
 
+    def _product_terms(self, product: ProductInfo) -> set[str]:
+        values = " ".join(
+            [product.title, product.short_description, *product.usps]
+        ).lower()
+        return {
+            token for token in re.findall(r"[a-z0-9]+", values)
+            if token and token not in STOPWORDS and len(token) > 2
+        }
+
+    def _is_generic_copy(self, text: str, product: ProductInfo) -> bool:
+        normalized = " ".join(str(text).strip().lower().split())
+        if not normalized:
+            return True
+        if normalized in GENERIC_COPY_BAN:
+            return True
+        if any(term in normalized for term in INTENT_TERMS):
+            return True
+        if normalized.startswith("gymshark ") and len(normalized.split()) <= 3:
+            return True
+
+        words = [
+            token for token in re.findall(r"[a-z0-9]+", normalized)
+            if token not in STOPWORDS and len(token) > 2
+        ]
+        if not words:
+            return True
+
+        product_terms = self._product_terms(product)
+        if len(words) <= 3 and set(words).issubset(product_terms):
+            return True
+        if len(words) <= 4 and sum(word in product_terms for word in words) >= max(2, len(words) - 1):
+            return True
+        return False
+
+    def _clean_callouts(self, values: Iterable[str], product: ProductInfo, limit: int) -> list[str]:
+        cleaned = self._clean_items(values, limit * 2)
+        curated: list[str] = []
+        for item in cleaned:
+            if self._is_generic_copy(item, product):
+                continue
+            curated.append(item)
+            if len(curated) >= limit:
+                break
+        return curated
+
+    def _fallback_callouts(self, product: ProductInfo, slot_name: str, limit: int) -> list[str]:
+        haystack = " ".join([product.title, product.short_description, *product.usps]).lower()
+        candidates: list[str] = []
+
+        if any(term in haystack for term in {"water bottle", "bottle", "hydration", "drinkware"}):
+            candidates.extend([
+                "Gym-ready hydration",
+                "Secure carry loop",
+                "Leak-resistant lid",
+                "Large daily capacity",
+            ])
+        elif any(term in haystack for term in {"shoe", "sneaker", "running", "trainer"}):
+            candidates.extend([
+                "Responsive cushioning",
+                "Breathable upper",
+                "Lightweight comfort",
+                "Everyday training",
+            ])
+        elif any(term in haystack for term in {"shirt", "tee", "t-shirt", "polo", "hoodie", "tank"}):
+            candidates.extend([
+                "Comfort-first fit",
+                "Breathable fabric",
+                "Clean athletic style",
+                "Made for daily wear",
+            ])
+        elif any(term in haystack for term in {"bag", "backpack", "duffel"}):
+            candidates.extend([
+                "Organized storage",
+                "Comfortable carry",
+                "Durable build",
+                "Everyday commute ready",
+            ])
+
+        if "gym" in haystack:
+            candidates.append("Built for gym sessions")
+        if "travel" in haystack or "portable" in haystack:
+            candidates.append("Easy to carry")
+        if "premium" in haystack:
+            candidates.append("Premium finish")
+        if "durable" in haystack:
+            candidates.append("Durable construction")
+        if "lightweight" in haystack:
+            candidates.append("Lightweight feel")
+
+        if slot_name == "lifestyle":
+            candidates.extend([
+                "Active daily use",
+                "Clean athletic styling",
+            ])
+        elif slot_name in {"key_facts", "usps"}:
+            candidates.extend([
+                "Designed for daily use",
+                "Clean modern finish",
+                "Portable everyday essential",
+            ])
+
+        return self._clean_callouts(candidates, product, limit)
+
+    def _fallback_scenario(self, product: ProductInfo) -> str:
+        haystack = " ".join([product.title, product.short_description, *product.usps]).lower()
+        if any(term in haystack for term in {"water bottle", "bottle", "hydration", "drinkware"}):
+            return (
+                "Athlete taking a hydration break in a bright premium gym studio, "
+                "natural posture, clean editorial framing, realistic athletic environment."
+            )
+        if any(term in haystack for term in {"shoe", "sneaker", "running", "trainer"}):
+            return (
+                "Runner pausing mid-session in a clean urban training setting, "
+                "dynamic but believable movement, crisp commercial sports photography."
+            )
+        if any(term in haystack for term in {"shirt", "tee", "t-shirt", "polo", "hoodie", "tank"}):
+            return (
+                "Model wearing the product in a bright premium fitness or lifestyle setting, "
+                "natural body language, polished editorial lighting."
+            )
+        return (
+            "Product used naturally in a bright premium everyday setting with authentic movement, "
+            "clean editorial framing, and realistic commercial lighting."
+        )
+
     def _build_copy_plan(
         self,
         brief: ImageBrief,
@@ -111,39 +253,40 @@ class SlotPlanner:
             return SlotCopyPlan(overlay_enabled=False, notes=["main image does not allow overlays"])
 
         if slot_name == "key_facts":
-            hinted = self._clean_items(slot_hints.get("callouts", []), 4)
-            callouts = hinted[:4] or explicit[:4] or keyword_text[:4]
+            hinted = self._clean_callouts(slot_hints.get("callouts", []), product, 4)
+            callouts = hinted[:4] or self._clean_callouts(explicit[:4], product, 4) or self._fallback_callouts(product, "key_facts", 4)
             return SlotCopyPlan(
                 overlay_enabled=bool(callouts),
                 callouts=callouts,
-                notes=["render as exact fact cards", "skip overlay if no explicit or keyword text"],
+                notes=["render as exact fact cards", "skip keyword-like or generic category phrases"],
             )
 
         if slot_name == "lifestyle":
-            hinted = self._clean_items(slot_hints.get("callouts", []), 3)
-            callouts = hinted[:3] or explicit[:3] or keyword_text[:3]
+            hinted = self._clean_callouts(slot_hints.get("callouts", []), product, 3)
+            callouts = hinted[:2] or self._clean_callouts(explicit[:2], product, 2) or self._fallback_callouts(product, "lifestyle", 2)
+            scenario = self._clean_items([slot_hints.get("scenario", "")], 1)[0] if slot_hints.get("scenario") else self._fallback_scenario(product)
             return SlotCopyPlan(
                 overlay_enabled=bool(callouts),
-                scenario=self._clean_items([slot_hints.get("scenario", "")], 1)[0] if slot_hints.get("scenario") else None,
+                scenario=scenario,
                 callouts=callouts,
-                notes=["keep claims minimal and contextual", "use visual-only output if no overlay text available"],
+                notes=["keep claims minimal and contextual", "do not use SEO keywords as visible lifestyle copy"],
             )
 
         if slot_name == "usps":
             hinted_headline = self._clean_items([slot_hints.get("headline", "")], 1)[0] if slot_hints.get("headline") else None
-            hinted_callouts = self._clean_items(slot_hints.get("callouts", []), 3)
+            hinted_callouts = self._clean_callouts(slot_hints.get("callouts", []), product, 3)
             if len(explicit) == 1 and not hinted_callouts:
                 return SlotCopyPlan(
                     overlay_enabled=True,
                     headline=hinted_headline or explicit[0],
                     notes=["single focused headline"],
                 )
-            callouts = hinted_callouts[:3] or explicit[:3] or keyword_text[:3]
+            callouts = hinted_callouts[:3] or self._clean_callouts(explicit[:3], product, 3) or self._fallback_callouts(product, "usps", 3)
             return SlotCopyPlan(
                 overlay_enabled=bool(callouts),
                 callouts=callouts,
                 headline=hinted_headline or (explicit[0] if explicit and len(explicit) > 1 else None),
-                notes=["use structured USP callouts", "no free-floating badges"],
+                notes=["use structured USP callouts", "avoid category-only SEO phrases"],
             )
 
         if slot_name == "comparison":

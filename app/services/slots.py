@@ -203,24 +203,70 @@ def build_followup_suggestions(project, brand, product, main_image_url: str | No
     This is heuristic (no real vision analysis) but keeps prompts consistent.
     """
     cat = getattr(project, "product_category", "") or getattr(product, "product_category", "") or "the product"
+    haystack = " ".join([
+        getattr(project, "product_category", "") or "",
+        getattr(product, "title", "") or "",
+        getattr(product, "short_description", "") or "",
+        " ".join(getattr(product, "usps", []) or []),
+    ]).lower()
 
     # Helpers
     def top_items(items, n=4):
         return [i for i in items if i][:n]
 
-    key_facts = top_items(product.usps, 4) or [
-        f"Crisp detail of {cat}",
-        "Highlight build quality",
-        "Show key accessory in frame",
-        "Emphasize scale/size clearly",
-    ]
+    def category_defaults():
+        if any(term in haystack for term in {"water bottle", "bottle", "hydration", "drinkware"}):
+            return {
+                "facts": ["Gym-ready hydration", "Secure carry loop", "Leak-resistant lid", "Large daily capacity"],
+                "scene": (
+                    f"{product.title} being used during a real gym hydration break with clean editorial lighting, "
+                    "authentic athletic posture, and premium commercial framing."
+                ),
+                "usps": ["Built for gym sessions", "Secure carry loop", "Leak-resistant lid"],
+            }
+        if any(term in haystack for term in {"shoe", "sneaker", "running", "trainer"}):
+            return {
+                "facts": ["Responsive cushioning", "Breathable upper", "Lightweight comfort", "Everyday training"],
+                "scene": (
+                    f"{product.title} being worn in an active training moment with believable motion, "
+                    "clean commercial sports styling, and strong product visibility."
+                ),
+                "usps": ["Responsive cushioning", "Breathable upper", "Built for training"],
+            }
+        if any(term in haystack for term in {"shirt", "tee", "t-shirt", "polo", "hoodie", "tank"}):
+            return {
+                "facts": ["Comfort-first fit", "Breathable fabric", "Clean athletic style", "Made for daily wear"],
+                "scene": (
+                    f"{product.title} styled on-model in a premium fitness or everyday lifestyle setting, "
+                    "natural body language, polished editorial lighting."
+                ),
+                "usps": ["Comfort-first fit", "Breathable fabric", "Clean athletic style"],
+            }
+        return {
+            "facts": [
+                "Designed for daily use",
+                "Clean modern finish",
+                "Portable everyday essential",
+                "Built for consistent use",
+            ],
+            "scene": (
+                f"{product.title} being used naturally in a premium lifestyle setting for {cat}, "
+                "clean editorial framing, believable context, and strong product focus."
+            ),
+            "usps": [
+                "Designed for daily use",
+                "Clean modern finish",
+                "Portable everyday essential",
+            ],
+        }
 
-    lifestyle_scene = (
-        f"{product.title} being used naturally in a setting that matches its category ({cat}). "
-        "Keep product as hero; warm, realistic lighting. Use the uploaded main product photo as reference."
-    )
+    defaults = category_defaults()
 
-    usp_list = top_items(product.usps, 4) or key_facts
+    key_facts = top_items(product.usps, 4) or defaults["facts"]
+
+    lifestyle_scene = defaults["scene"]
+
+    usp_list = top_items(product.usps, 4) or defaults["usps"]
 
     advantages = usp_list[:3] or ["Premium build", "Easy setup", "Trusted brand"]
     limitations = ["Generic alternatives feel cheaper", "Shorter warranty elsewhere", "Inconsistent reviews"]

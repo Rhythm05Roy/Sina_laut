@@ -54,19 +54,23 @@ class GeminiMarketPlanner:
             user_prompt += (
                 "Keys: callouts (3-4 items). "
                 "Each callout must be a clean marketplace-ready phrase, 2-5 words, truthful and visually usable. "
-                "Prefer category-specific benefits over generic adjectives."
+                "Prefer category-specific benefits over generic adjectives. "
+                "Do not return category-only phrases or brand-plus-category phrases such as "
+                "'water bottle', 'gymshark water', or 'gymshark water bottle'."
             )
         elif brief.slot_name == "lifestyle":
             user_prompt += (
                 "Keys: scenario (string), callouts (0-3 items). "
                 "If user gave a scenario, optimize it into a more market-ready photographic scenario. "
                 "If not, create a realistic scenario matching the marketplace and product. "
-                "Callouts must be short contextual claims."
+                "Callouts must be short contextual claims. "
+                "Do not use SEO keywords, category labels, or brand-plus-category phrases as lifestyle callouts."
             )
         elif brief.slot_name == "usps":
             user_prompt += (
                 "Keys: headline (optional string), callouts (1-3 items). "
-                "Optimize the user-provided USPs into concise market-ready phrases."
+                "Optimize the user-provided USPs into concise market-ready phrases. "
+                "Do not return generic phrases like 'water bottle' or layout instructions like 'centered product'."
             )
         elif brief.slot_name == "comparison":
             user_prompt += (
